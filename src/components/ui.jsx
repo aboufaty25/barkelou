@@ -4,6 +4,7 @@ import { ArrowLeft, CalendarClock, Heart, MapPin, Users, X } from 'lucide-react'
 import { catById } from '../lib/categories'
 import { colorFor, compact, daysLeftLabel, fcfa, initials, pct } from '../lib/utils'
 import { useStore } from '../store/AppStore'
+import { AlertTriangle, RefreshCw } from 'lucide-react'
 
 export function Logo({ size = 32, withText = true, light = false }) {
   return (
@@ -63,8 +64,9 @@ export function CategoryChip({ id, light = false }) {
 }
 
 export function FavButton({ id, className = '' }) {
-  const { state, toggleFavorite } = useStore()
-  const on = state.favorites.includes(id)
+  const { user, favorites, toggleFavorite } = useStore()
+  const navigate = useNavigate()
+  const on = favorites.has(id)
   return (
     <button
       type="button"
@@ -74,6 +76,7 @@ export function FavButton({ id, className = '' }) {
       onClick={(e) => {
         e.preventDefault()
         e.stopPropagation()
+        if (!user) return navigate(`/connexion?next=${encodeURIComponent(window.location.pathname)}`)
         toggleFavorite(id)
       }}
     >
@@ -83,7 +86,8 @@ export function FavButton({ id, className = '' }) {
 }
 
 export function CampaignCard({ campaign, variant = 'default' }) {
-  const p = pct(campaign.raised, campaign.goal)
+  const hidden = campaign.raised === null || campaign.raised === undefined
+  const p = hidden ? null : campaign.percent ?? pct(campaign.raised, campaign.goal)
   const ended = campaign.status === 'closed'
   return (
     <Link to={`/c/${campaign.slug}`} className={`ccard ccard--${variant}`}>
@@ -109,14 +113,22 @@ export function CampaignCard({ campaign, variant = 'default' }) {
             </>
           )}
         </p>
-        <Progress value={p} />
-        <div className="ccard__nums">
-          <span>
-            <strong>{fcfa(campaign.raised)}</strong>
-            <em> / {compact(campaign.goal)}</em>
-          </span>
-          <span className="muted">{ended ? 'Clôturée' : `${p} %`}</span>
-        </div>
+        {hidden ? (
+          <div className="ccard__nums">
+            <span className="muted">Montants privés · objectif {compact(campaign.goal)} F</span>
+          </div>
+        ) : (
+          <>
+            <Progress value={p} />
+            <div className="ccard__nums">
+              <span>
+                <strong>{fcfa(campaign.raised)}</strong>
+                <em> / {compact(campaign.goal)}</em>
+              </span>
+              <span className="muted">{ended ? 'Clôturée' : `${p} %`}</span>
+            </div>
+          </>
+        )}
         {variant !== 'row' && (
           <div className="ccard__foot">
             <span>
@@ -232,4 +244,34 @@ export function MethodBadge({ method, size = 36 }) {
       )}
     </span>
   )
+}
+
+export function Loader({ label = 'Chargement…' }) {
+  return (
+    <div className="page-loading" role="status">
+      <Spinner size={28} />
+      <span className="sr-only">{label}</span>
+    </div>
+  )
+}
+
+export function ErrorState({ error, onRetry }) {
+  return (
+    <Empty
+      icon={AlertTriangle}
+      title={error?.status === 404 ? 'Introuvable' : 'Oups, un problème est survenu'}
+      text={error?.message || 'Réessayez dans un instant.'}
+      action={
+        onRetry && (
+          <button className="btn btn--soft" onClick={onRetry}>
+            <RefreshCw size={16} /> Réessayer
+          </button>
+        )
+      }
+    />
+  )
+}
+
+export function SkeletonCards({ n = 3 }) {
+  return Array.from({ length: n }, (_, i) => <div key={i} className="ccard skeleton" aria-hidden="true" />)
 }

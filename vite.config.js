@@ -3,11 +3,17 @@ import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
 
 export default defineConfig({
+  server: {
+    proxy: { '/api': 'http://localhost:3000' },
+  },
+  preview: {
+    proxy: { '/api': 'http://localhost:3000' },
+  },
   plugins: [
     react(),
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['favicon.svg', 'apple-touch-icon.png', 'CNAME'],
+      includeAssets: ['favicon.svg', 'apple-touch-icon.png'],
       manifest: {
         id: '/',
         name: 'Barkelou — Cagnottes en ligne',
@@ -36,6 +42,7 @@ export default defineConfig({
       },
       workbox: {
         navigateFallback: '/index.html',
+        navigateFallbackDenylist: [/^\/api\//],
         globPatterns: ['**/*.{js,css,html,svg,png,ico,woff2}'],
         runtimeCaching: [
           {

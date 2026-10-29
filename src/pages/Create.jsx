@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link, Navigate, useNavigate, useParams } from 'react-router-dom'
 import { Camera, Check, ChevronRight, ImagePlus, PartyPopper, Trash2 } from 'lucide-react'
-import { useStore, useToast } from '../store/AppStore'
+import { useApi, useStore, useToast } from '../store/AppStore'
+import { api } from '../lib/api'
 import { CATEGORIES } from '../lib/categories'
 import { compressImage, fcfa, formatDate } from '../lib/utils'
 import { useDocumentTitle, useShare } from '../lib/hooks'
-import { CampaignCard, Field, TopBar } from '../components/ui'
+import { CampaignCard, ErrorState, Field, Loader, Spinner, TopBar } from '../components/ui'
 
 const DRAFT_KEY = 'barkelou:draft'
 const GOALS = [100000, 250000, 500000, 1000000, 2500000]
@@ -15,9 +16,21 @@ const minDate = () => new Date(Date.now() + 86400000).toISOString().slice(0, 10)
 
 export default function Create() {
   const { slug } = useParams()
-  const editing = !!slug
-  const { user, campaigns, createCampaign, updateCampaign } = useStore()
-  const existing = editing ? campaigns.find((c) => c.slug === slug) : null
+  const { user, ready } = useStore()
+  const q = useApi(slug && user ? `/campaigns/${encodeURIComponent(slug)}` : null)
+  if (!ready) return <Loader />
+  if (!user) return <Navigate to={`/connexion?next=${encodeURIComponent(slug ? `/c/${slug}/modifier` : '/creer')}`} replace />
+  if (!slug) return <CreateForm />
+  if (q.loading || (!q.data && !q.error)) return <Loader />
+  if (q.error) return <div className="page"><TopBar title="Modifier" /><div className="container narrow"><ErrorState error={q.error} /></div></div>
+  if (!q.data.campaign.isOwner) return <Navigate to="/mes-cagnottes" replace />
+  return <CreateForm existing={{ ...q.data.campaign, raised: q.data.campaign.raised || 0 }} />
+}
+
+function CreateForm({ existing = null }) {
+  const editing = !!existing
+  const { user, settings } = useStore()
+  const [busy, setBusy] = useState(false)
   const navigate = useNavigate()
   const toast = useToast()
   const share = useShare()
@@ -27,7 +40,7 @@ export default function Create() {
   const [touched, setTouched] = useState(false)
   const [created, setCreated] = useState(null)
   const [data, setData] = useState(() => {
-    if (existing) return { ...empty, ...existing, goal: String(existing.goal) }
+    if (existing) return { ...empty, ...existing, deadline: existing.deadline || '', goal: String(existing.goal) }
     try {
       return { ...empty, ...JSON.parse(localStorage.getItem(DRAFT_KEY) || '{}') }
     } catch {
@@ -45,8 +58,6 @@ export default function Create() {
     }
   }, [data, editing, created])
 
-  if (!user) return <Navigate to="/connexion?next=/creer" replace state={{ reason: 'create' }} />
-  if (editing && (!existing || existing.ownerId !== user.id)) return <Navigate to="/mes-cagnottes" replace />
 
   const set = (k) => (e) => setData((d) => ({ ...d, [k]: e?.target ? e.target.value : e }))
   const goal = Number(data.goal) || 0
@@ -57,7 +68,7 @@ export default function Create() {
       title: data.title.trim().length < 6 && 'Au moins 6 caractères',
     },
     2: {
-      goal: goal < 10000 ? 'Objectif minimum : 10 000 F' : goal > 500_000_000 ? 'Objectif trop élevé' : '',
+      goal: goal < 10000 ? 'Objectif minimum : 10 000 F' : goal > settings.max_campaign_goal ? `Objectif maximum : ${fcfa(settings.max_campaign_goal)}` : '',
       deadline: data.deadline && data.deadline < minDate() && !editing ? 'La date doit être dans le futur' : '',
     },
     3: { story: data.story.trim().length < 30 && `Encore ${30 - data.story.trim().length} caractères minimum` },
@@ -72,7 +83,7 @@ export default function Create() {
     if (step < 4) setStep(step + 1)
   }
 
-  const publish = () => {
+  const publish = async () => {
     const payload = {
       category: data.category,
       title: data.title.trim(),
@@ -80,18 +91,27 @@ export default function Create() {
       goal,
       deadline: data.deadline || null,
       story: data.story.trim(),
-      cover: data.cover,
-      hideAmounts: data.hideAmounts,
+      hide_amounts: !!data.hideAmounts,
     }
-    if (editing) {
-      updateCampaign(existing.id, payload)
-      toast('Modifications enregistrées ✓', 'success')
-      navigate(`/c/${existing.slug}`, { replace: true })
-      return
+    // L'image n'est envoyée que si elle a été ajoutée, changée ou retirée
+    if (data.cover?.startsWith('data:')) payload.cover = data.cover
+    else if (!data.cover && existing?.cover) payload.cover = null
+    setBusy(true)
+    try {
+      if (editing) {
+        await api.patch(`/campaigns/${existing.id}`, payload)
+        toast('Modifications enregistrées ✓', 'success')
+        navigate(`/c/${existing.slug}`, { replace: true })
+        return
+      }
+      const { campaign } = await api.post('/campaigns', payload)
+      localStorage.removeItem(DRAFT_KEY)
+      setCreated({ ...payload, ...campaign, cover: data.cover, hideAmounts: payload.hide_amounts, ownerName: user.name, raised: 0, percent: 0, count: 0 })
+    } catch (e) {
+      toast(e.message, 'error')
+    } finally {
+      setBusy(false)
     }
-    const c = createCampaign(payload)
-    localStorage.removeItem(DRAFT_KEY)
-    setCreated(c)
   }
 
   const onFile = async (e) => {
@@ -111,8 +131,12 @@ export default function Create() {
       <div className="page success">
         <div className="container narrow center">
           <span className="success__check success__check--gold"><PartyPopper size={36} /></span>
-          <h1>Votre cagnotte est en ligne !</h1>
-          <p className="lead">Partagez-la maintenant à vos proches : les premières 24 h sont décisives.</p>
+          <h1>{created.status === 'pending' ? 'Cagnotte envoyée !' : 'Votre cagnotte est en ligne !'}</h1>
+          <p className="lead">
+            {created.status === 'pending'
+              ? 'Notre équipe la vérifie avant publication. Vous pourrez la partager dès sa validation.'
+              : 'Partagez-la maintenant à vos proches : les premières 24 h sont décisives.'}
+          </p>
           <div className="success__preview">
             <CampaignCard campaign={{ ...created, raised: 0, count: 0 }} />
           </div>
@@ -259,8 +283,8 @@ export default function Create() {
               Continuer <ChevronRight size={18} />
             </button>
           ) : (
-            <button className="btn btn--primary btn--lg btn--grow" onClick={publish}>
-              {editing ? 'Enregistrer' : 'Publier ma cagnotte'}
+            <button className="btn btn--primary btn--lg btn--grow" onClick={publish} disabled={busy}>
+              {busy ? <Spinner /> : editing ? 'Enregistrer' : 'Publier ma cagnotte'}
             </button>
           )}
         </div>

@@ -1,12 +1,13 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import {
-  ChevronRight, CircleHelp, Download, FileText, Heart, LogOut, MessageCircle, Moon, PiggyBank, RotateCcw, Shield, Sun, SunMoon, UserPen,
+  ChevronRight, CircleHelp, Download, FileText, Heart, KeyRound, LaptopMinimal, LayoutDashboard, LogOut, MessageCircle, Moon, PiggyBank, Shield, Sun, SunMoon, UserPen,
 } from 'lucide-react'
 import { useStore, useToast } from '../store/AppStore'
+import { api } from '../lib/api'
 import { formatPhone } from '../lib/utils'
 import { useDocumentTitle, useInstallPrompt } from '../lib/hooks'
-import { Avatar, Field, Logo, Sheet, TopBar } from '../components/ui'
+import { Avatar, Field, Logo, Sheet, Spinner, TopBar } from '../components/ui'
 
 export function applyTheme(t) {
   const root = document.documentElement
@@ -18,11 +19,12 @@ export function applyTheme(t) {
 
 export default function Profile() {
   useDocumentTitle('Profil')
-  const { user, logout, updateUser, resetDemo } = useStore()
+  const { user, logout, logoutAll, updateUser, settings } = useStore()
   const toast = useToast()
   const navigate = useNavigate()
   const { canInstall, installed, ios, install } = useInstallPrompt()
   const [editOpen, setEditOpen] = useState(false)
+  const [pwOpen, setPwOpen] = useState(false)
   const [theme, setTheme] = useState(() => localStorage.getItem('barkelou:theme') || 'auto')
 
   useEffect(() => {
@@ -54,6 +56,13 @@ export default function Profile() {
               <span className="muted">Connectez-vous pour créer et gérer vos cagnottes.</span>
             </div>
             <Link to="/connexion?next=/profil" className="btn btn--primary btn--block">Se connecter / S’inscrire</Link>
+          </div>
+        )}
+
+        {user?.role === 'admin' && (
+          <div className="menu-group">
+            <h3>Administration</h3>
+            <MenuLink to="/admin" icon={LayoutDashboard} label="Espace administrateur" />
           </div>
         )}
 
@@ -98,32 +107,40 @@ export default function Profile() {
         <div className="menu-group">
           <h3>Aide & informations</h3>
           <MenuLink to="/comment-ca-marche" icon={CircleHelp} label="Comment ça marche & FAQ" />
-          <MenuLink href="https://wa.me/221770000000" icon={MessageCircle} label="Nous écrire sur WhatsApp" />
+          <MenuLink href={`https://wa.me/${settings.contact_whatsapp}`} icon={MessageCircle} label="Nous écrire sur WhatsApp" />
           <MenuLink to="/cgu" icon={FileText} label="Conditions d’utilisation" />
           <MenuLink to="/confidentialite" icon={Shield} label="Confidentialité" />
         </div>
 
-        <div className="menu-group">
-          <button
-            className="menu-item"
-            onClick={() => {
-              if (confirm('Réinitialiser toutes les données de cet appareil (comptes, cagnottes, participations) ?')) {
-                resetDemo()
-                localStorage.removeItem('barkelou:draft')
-                toast('Données réinitialisées')
-                navigate('/')
-              }
-            }}
-          >
-            <span className="menu-item__icon"><RotateCcw size={18} /></span>
-            <span>Réinitialiser les données</span>
-            <ChevronRight size={18} className="muted" />
-          </button>
-          {user && (
+        {user && (
+          <div className="menu-group">
+            <h3>Sécurité</h3>
+            <button className="menu-item" onClick={() => setPwOpen(true)}>
+              <span className="menu-item__icon"><KeyRound size={18} /></span>
+              <span>Changer mon mot de passe</span>
+              <ChevronRight size={18} className="muted" />
+            </button>
+            <button
+              className="menu-item"
+              onClick={async () => {
+                if (!confirm('Se déconnecter de tous les appareils ?')) return
+                try {
+                  await logoutAll()
+                  toast('Déconnecté de tous les appareils')
+                  navigate('/')
+                } catch (e) {
+                  toast(e.message, 'error')
+                }
+              }}
+            >
+              <span className="menu-item__icon"><LaptopMinimal size={18} /></span>
+              <span>Déconnecter tous mes appareils</span>
+              <ChevronRight size={18} className="muted" />
+            </button>
             <button
               className="menu-item menu-item--danger"
-              onClick={() => {
-                logout()
+              onClick={async () => {
+                await logout()
                 toast('Vous êtes déconnecté')
                 navigate('/')
               }}
@@ -131,13 +148,29 @@ export default function Profile() {
               <span className="menu-item__icon"><LogOut size={18} /></span>
               <span>Se déconnecter</span>
             </button>
-          )}
-        </div>
+          </div>
+        )}
 
         <p className="center muted small pad-y">Barkelou v1.0 · barkelou.com</p>
       </div>
 
-      {user && <EditProfile open={editOpen} onClose={() => setEditOpen(false)} user={user} onSave={(p) => { updateUser(p); toast('Profil mis à jour ✓', 'success'); setEditOpen(false) }} />}
+      {user && (
+        <EditProfile
+          open={editOpen}
+          onClose={() => setEditOpen(false)}
+          user={user}
+          onSave={async (p) => {
+            try {
+              await updateUser(p)
+              toast('Profil mis à jour ✓', 'success')
+              setEditOpen(false)
+            } catch (e) {
+              toast(e.message, 'error')
+            }
+          }}
+        />
+      )}
+      {user && <ChangePassword open={pwOpen} onClose={() => setPwOpen(false)} />}
     </div>
   )
 }
@@ -171,6 +204,46 @@ function EditProfile({ open, onClose, user, onSave }) {
       <button className="btn btn--primary btn--lg btn--block" disabled={name.trim().length < 2} onClick={() => onSave({ name: name.trim(), email: email.trim() })}>
         Enregistrer
       </button>
+    </Sheet>
+  )
+}
+
+function ChangePassword({ open, onClose }) {
+  const toast = useToast()
+  const [current, setCurrent] = useState('')
+  const [next, setNext] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const submit = async (e) => {
+    e.preventDefault()
+    setBusy(true)
+    setError('')
+    try {
+      await api.post('/auth/password', { current, next })
+      toast('Mot de passe modifié ✓ — vos autres appareils sont déconnectés', 'success')
+      setCurrent('')
+      setNext('')
+      onClose()
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <Sheet open={open} onClose={onClose} title="Changer mon mot de passe">
+      <form onSubmit={submit} className="sheet__body" noValidate>
+        <Field label="Mot de passe actuel" htmlFor="pw-cur">
+          <input id="pw-cur" type="password" autoComplete="current-password" className="input" value={current} onChange={(e) => setCurrent(e.target.value)} />
+        </Field>
+        <Field label="Nouveau mot de passe" htmlFor="pw-new" error={next && next.length < 8 ? '8 caractères minimum' : ''}>
+          <input id="pw-new" type="password" autoComplete="new-password" className="input" value={next} onChange={(e) => setNext(e.target.value)} />
+        </Field>
+        {error && <p className="alert alert--error">{error}</p>}
+        <button className="btn btn--primary btn--lg btn--block" disabled={busy || !current || next.length < 8}>
+          {busy ? <Spinner /> : 'Enregistrer'}
+        </button>
+      </form>
     </Sheet>
   )
 }

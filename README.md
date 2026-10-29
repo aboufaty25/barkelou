@@ -1,57 +1,86 @@
 # Barkelou — cagnottes en ligne
 
-**barkelou.com** · Plateforme de cagnottes en ligne pensée pour le Sénégal : mariage, baptême, santé, éducation, solidarité, projets… Les participations se font par **Wave, Orange Money, Free Money ou carte bancaire**.
+**barkelou.com** · Plateforme de cagnottes en ligne pour le Sénégal : mariage, baptême, santé, éducation, solidarité, projets…
+Paiements et retraits par **Wave, Orange Money, Free Money et carte bancaire** via **PayDunya**.
 
-Application **React (Vite)** livrée en **PWA** : sur mobile, elle s’installe sur l’écran d’accueil et se comporte comme une application native (barre d’onglets, feuilles modales, plein écran, mode hors ligne, mode sombre).
+- Application **React (Vite) + PWA** : sur mobile elle s’installe et se comporte comme une application native.
+- Serveur **Node.js (Express) + PostgreSQL** : comptes, cagnottes, paiements PayDunya, commissions, retraits, espace admin.
 
-## Fonctionnalités
+---
 
-- **Accueil** : héros, statistiques, catégories, cagnottes à la une, nouvelles cagnottes, bannière d’installation de l’app
-- **Explorer** : recherche (sans accents), filtres par catégorie, favoris, tri (populaires, récentes, bientôt finies, presque atteintes)
-- **Page cagnotte** : progression, organisateur vérifié, histoire, liste des participants, mots d’encouragement, partage (WhatsApp, Facebook, copie du lien, partage natif)
-- **Participer** : montants rapides ou libres, participation anonyme, message, choix Wave / Orange Money / Free Money / carte, validation, écran de remerciement
-- **Créer / modifier une cagnotte** en 4 étapes, avec photo de couverture (compressée automatiquement), date limite facultative, option « masquer les montants », brouillon sauvegardé
-- **Gestion organisateur** : modifier, clôturer / rouvrir, demander un retrait vers Wave / Orange Money / Free Money, supprimer
-- **Mes cagnottes** : total collecté, participations reçues, mes dons, favoris
-- **Compte** : inscription / connexion par numéro sénégalais, profil, thème clair / sombre / auto
-- **PWA** : manifest, icônes (dont maskable), service worker Workbox, raccourcis « Créer » et « Explorer », fonctionnement hors ligne
-- Pages **Comment ça marche + FAQ**, **CGU**, **Confidentialité**
+## 1. Ce que fait la plateforme
 
-## Démarrer
+**Organisateurs** : créer une cagnotte (photo, objectif, date limite, montants masquables), la partager, suivre les participations, **retirer leur argent à tout moment** vers Wave / Orange Money / Free Money.
+
+**Donateurs** : participer sans compte, anonymement s’ils le souhaitent, avec un petit mot. Le paiement se fait sur la page sécurisée PayDunya.
+
+**Administrateur** (`/admin`) :
+| Section | Contenu |
+|---|---|
+| Tableau de bord | Total collecté, commissions gagnées, fonds à reverser, versements, alertes, graphique 30 jours |
+| Paramètres | Commission (% + fixe, payée par l’organisateur ou le donateur), frais de retrait, minimums / maximums, plafond de retrait par 24 h, retraits automatiques ou validés à la main, moyens de paiement et de retrait activés, **clés PayDunya** (test / production), inscriptions, validation des cagnottes, mode maintenance, contacts |
+| Retraits | Valider / refuser (mode manuel), suivre les envois |
+| Paiements | Tous les paiements avec commission et net |
+| Cagnottes | Valider, suspendre, réactiver, mettre à la une |
+| Utilisateurs | Suspendre, nommer administrateur |
+| Journal | Journal de sécurité de toutes les opérations sensibles |
+
+## 2. Sécurité
+
+- **Argent** : le navigateur n’est jamais cru. Chaque paiement est confirmé directement auprès de PayDunya (API *confirm*), le montant payé doit correspondre exactement, les notifications PayDunya sont vérifiées (signature SHA-512) et traitées une seule fois.
+- **Retraits** : mot de passe redemandé à chaque retrait, envoi uniquement au numéro du compte (réglable), verrou en base empêchant deux retraits simultanés de dépasser le solde, plafond par 24 h, solde restitué automatiquement si l’opérateur échoue, vérification en tâche de fond des retraits en cours.
+- **Comptes** : mots de passe hachés (bcrypt), session en cookie `httpOnly` / `Secure` / `SameSite`, verrouillage après 5 échecs, limitation de débit sur la connexion, les paiements et les retraits, déconnexion de tous les appareils, suspension immédiate.
+- **Admin** : chaque changement de paramètres, validation de retrait ou nomination d’admin exige le mot de passe administrateur. Les clés PayDunya sont **chiffrées en base (AES-256-GCM)** et ne sont jamais réaffichées.
+- **Web** : protection CSRF (en-tête dédié + contrôle d’origine), en-têtes de sécurité stricts (CSP, HSTS, anti-iframe), validation de toutes les entrées, requêtes SQL paramétrées, vérification du contenu réel des images envoyées, journal d’audit.
+- **Tests** : `npm test` vérifie 17 scénarios dont les tentatives de fraude (IPN falsifiée, montant modifié, retraits simultanés, accès d’un autre utilisateur, injection SQL…).
+
+## 3. Mise en ligne
+
+### Pré-requis
+- Un hébergeur Node.js : **Render**, **Railway**, **Fly.io** ou un **VPS** (Docker fourni).
+- Une base **PostgreSQL** (Neon, Supabase, Render, Railway…).
+- Un compte **PayDunya Business** avec une application d’intégration, et l’**API de déboursement (PUSH)** activée pour les retraits.
+
+### Étapes
+1. **Variables d’environnement** : copiez `.env.example`, générez les secrets avec `npm run secrets`, renseignez `DATABASE_URL` et `PUBLIC_URL=https://barkelou.com`.
+2. **Déploiement** :
+   - Render / Railway : commande de build `npm ci && npm run build`, commande de démarrage `npm start`.
+   - Docker : `docker build -t barkelou . && docker run --env-file .env -p 3000:3000 barkelou`.
+   Les tables sont créées automatiquement au démarrage.
+3. **Compte administrateur** (une seule fois, depuis le shell de l’hébergeur) :
+   ```bash
+   npm run create-admin -- --phone 77XXXXXXX --name "Votre Nom" --password "un-mot-de-passe-très-solide"
+   ```
+4. **Connectez-vous** sur barkelou.com, ouvrez **Profil › Espace administrateur › Paramètres › PayDunya** et collez la *Master Key*, la *Private Key* et le *Token*. Commencez en mode **Test**.
+5. **Chez PayDunya**, déclarez l’URL de notification `https://barkelou.com/api/payments/ipn`.
+6. **Domaine** : pointez `barkelou.com` vers votre hébergeur (enregistrements DNS indiqués par celui-ci). Le HTTPS est obligatoire.
+7. Faites un paiement et un retrait de test, puis passez PayDunya en mode **Production** dans les paramètres.
+
+> PayDunya documente l’URL de production du déboursement (`/api/v2/disburse`). L’URL sandbox utilisée en mode Test (`/sandbox-api/v2/disburse`) est déduite de celle de l’encaissement : vérifiez-la avec le support PayDunya, ou testez les retraits directement en production avec de petits montants.
+
+## 4. Développement
 
 ```bash
 npm install
-npm run dev       # http://localhost:5173
-npm run build     # génère dist/ (icônes PWA incluses)
-npm run preview   # teste la version de production
+# PostgreSQL local requis (par défaut postgres://postgres@localhost:5432/barkelou)
+npm run seed            # données de démonstration
+npm run create-admin -- --phone 771000001 --password "admin-local-123"
+npm run server          # API sur :3000 (PayDunya simulé automatiquement)
+npm run dev             # application sur :5173
+npm test                # tests de sécurité et de bout en bout (base barkelou_test)
 ```
 
-Node 20+ recommandé.
+Hors production, PayDunya est **simulé** : le bouton « Payer » ouvre un simulateur qui permet de valider ou d’annuler le paiement, et les retraits réussissent (un numéro se terminant par `000` simule un échec). Ce simulateur est impossible à activer en production.
 
-## Mise en ligne sur barkelou.com
-
-**Vercel (recommandé)** — importez ce dépôt sur vercel.com : framework *Vite*, commande `npm run build`, dossier `dist`. `vercel.json` gère déjà les routes de l’application. Ajoutez ensuite le domaine `barkelou.com` dans *Settings → Domains* et suivez les enregistrements DNS indiqués.
-
-**Netlify** — mêmes réglages ; `public/_redirects` gère les routes.
-
-## Important : données et paiements
-
-Cette version fonctionne **sans serveur** : comptes, cagnottes et participations sont enregistrés dans le navigateur de chaque visiteur (localStorage) et les paiements sont **simulés** (mode démonstration, affiché à l’écran). C’est idéal pour présenter et tester le produit, mais pour encaisser de vrais fonds il faut :
-
-1. **Un backend** (base de données partagée + authentification par SMS/OTP) pour que les cagnottes soient visibles par tous.
-2. **Un agrégateur de paiement** agréé au Sénégal (PayDunya, CinetPay, Wave Business API, Orange Money API…). Les clés privées doivent rester côté serveur.
-
-Tout le code de paiement est isolé dans `src/services/payments.js` : définissez `VITE_API_URL` (voir `.env.example`) et exposez les routes décrites en tête de ce fichier pour passer en paiements réels. Les données sont centralisées dans `src/store/AppStore.jsx`, à remplacer par des appels à votre API.
-
-## Structure
+## 5. Structure
 
 ```
-src/
-  components/   AppShell (en-tête, barre d’onglets, pied de page), composants UI
-  pages/        Home, Explore, Campaign, Contribute, Create, MyCampaigns, Profile, Auth, Info
-  store/        état global + persistance, notifications
-  services/     paiements (démo / API)
-  lib/          utilitaires (FCFA, dates, téléphone), catégories, hooks (installation PWA, partage)
-  data/         cagnottes d’exemple
-scripts/icons.mjs  génère les icônes PWA depuis public/favicon.svg
+server/
+  index.js, app.js        démarrage, sécurité HTTP, tâches de fond
+  routes/                 auth, campaigns, payments (PayDunya + IPN), withdrawals, admin
+  lib/                    paydunya, settings (paramètres admin), money (commissions, soldes), auth, crypto, limites
+  migrations/             schéma SQL
+  scripts/                create-admin, seed, secrets
+  test/                   tests de l’API
+src/                      application React (pages, composants, PWA)
 ```

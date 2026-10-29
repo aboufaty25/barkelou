@@ -5,9 +5,10 @@ import { useDocumentTitle } from '../lib/hooks'
 import { Empty, TopBar } from '../components/ui'
 
 const FAQ = [
-  ['Combien coûte Barkelou ?', 'La création d’une cagnotte est gratuite et Barkelou ne prélève aucune commission sur les fonds collectés. Seuls les éventuels frais de retrait de l’opérateur (Wave, Orange Money…) peuvent s’appliquer.'],
+  ['Combien coûte Barkelou ?', 'La création d’une cagnotte est gratuite. Une petite commission de service est appliquée sur chaque participation ; son montant exact est toujours affiché avant de payer.'],
   ['Comment mes proches peuvent-ils participer ?', 'Ils ouvrent le lien de votre cagnotte, choisissent un montant et paient par Wave, Orange Money, Free Money ou carte bancaire. Aucun compte n’est nécessaire pour participer.'],
-  ['Quand puis-je récupérer l’argent ?', 'À tout moment. Depuis votre cagnotte, touchez « Retirer », choisissez le montant et le numéro Wave ou Orange Money de réception. Les retraits sont traités sous 24 h ouvrées.'],
+  ['Quand puis-je récupérer l’argent ?', 'À tout moment, même si l’objectif n’est pas atteint. Depuis votre cagnotte, touchez « Retirer », choisissez le montant et confirmez avec votre mot de passe : l’argent est envoyé sur votre Wave, Orange Money ou Free Money.'],
+  ['Mon argent est-il en sécurité ?', 'Les paiements sont traités par PayDunya, prestataire agréé. Chaque retrait exige votre mot de passe et n’est envoyé qu’au numéro de votre compte. Toutes les opérations sensibles sont enregistrées dans un journal de sécurité.'],
   ['La diaspora peut-elle participer ?', 'Oui : les participants à l’étranger peuvent payer par carte bancaire Visa ou Mastercard, ou via Wave depuis les pays où le service est disponible.'],
   ['Puis-je participer anonymement ?', 'Oui. Cochez « Participer anonymement » : votre nom n’apparaîtra pas publiquement, seul l’organisateur pourra le voir.'],
   ['Puis-je cacher les montants donnés ?', 'Oui. À la création (ou en modifiant votre cagnotte), activez « Masquer les montants » : seuls les noms des participants seront visibles.'],

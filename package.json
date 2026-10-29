@@ -10,13 +10,28 @@
     "prebuild": "node scripts/icons.mjs",
     "build": "vite build",
     "preview": "vite preview",
-    "lint": "oxlint"
+    "lint": "oxlint",
+    "start": "NODE_ENV=production node server/index.js",
+    "server": "node --watch server/index.js",
+    "seed": "node server/scripts/seed.js",
+    "create-admin": "node server/scripts/create-admin.js",
+    "test": "node --test --test-concurrency=1 server/test/*.test.js",
+    "secrets": "node server/scripts/secrets.js"
   },
   "dependencies": {
+    "bcryptjs": "^3.0.3",
+    "compression": "^1.8.2",
+    "cookie-parser": "^1.4.7",
+    "express": "^5.3.0",
+    "express-rate-limit": "^8.7.2",
+    "helmet": "^8.3.0",
+    "jsonwebtoken": "^9.0.3",
     "lucide-react": "^1.64.0",
+    "pg": "^8.23.1",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
-    "react-router-dom": "^7.18.5"
+    "react-router-dom": "^7.18.5",
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@types/react": "^19.3.0",
@@ -27,5 +42,8 @@
     "vite": "^8.3.5",
     "vite-plugin-pwa": "^2.0.0"
   },
-  "description": "Barkelou — plateforme de cagnottes en ligne (React + PWA)"
+  "description": "Barkelou — plateforme de cagnottes en ligne (React + PWA)",
+  "engines": {
+    "node": ">=20"
+  }
 }

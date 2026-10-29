@@ -1,11 +1,11 @@
-import { useMemo } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { Heart, Search, SearchX, X } from 'lucide-react'
-import { useStore } from '../store/AppStore'
-import { CATEGORIES, catById } from '../lib/categories'
-import { daysLeft, pct } from '../lib/utils'
+import { useApi, useStore } from '../store/AppStore'
+import { CATEGORIES } from '../lib/categories'
+import { qs } from '../lib/api'
 import { useDocumentTitle } from '../lib/hooks'
-import { CampaignCard, Empty } from '../components/ui'
+import { CampaignCard, Empty, ErrorState, SkeletonCards } from '../components/ui'
 
 const SORTS = [
   { id: 'populaire', label: 'Populaires' },
@@ -14,16 +14,20 @@ const SORTS = [
   { id: 'proche', label: 'Presque atteintes' },
 ]
 
-const norm = (s) => s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
-
 export default function Explore() {
   useDocumentTitle('Explorer')
-  const { campaigns, state } = useStore()
+  const { user } = useStore()
   const [params, setParams] = useSearchParams()
   const q = params.get('q') || ''
   const cat = params.get('cat') || ''
   const sort = params.get('tri') || 'populaire'
   const favs = params.get('favoris') === '1'
+  const [debounced, setDebounced] = useState(q)
+
+  useEffect(() => {
+    const t = setTimeout(() => setDebounced(q.trim()), 300)
+    return () => clearTimeout(t)
+  }, [q])
 
   const set = (k, v) => {
     const next = new URLSearchParams(params)
@@ -32,22 +36,10 @@ export default function Explore() {
     setParams(next, { replace: true })
   }
 
-  const list = useMemo(() => {
-    let l = campaigns.filter((c) => c.status === 'active' || favs)
-    if (favs) l = l.filter((c) => state.favorites.includes(c.id))
-    if (cat) l = l.filter((c) => c.category === cat)
-    if (q) {
-      const n = norm(q)
-      l = l.filter((c) => norm(`${c.title} ${c.ownerName} ${c.city || ''} ${catById(c.category).label}`).includes(n))
-    }
-    const sorters = {
-      populaire: (a, b) => b.count - a.count,
-      recent: (a, b) => new Date(b.createdAt) - new Date(a.createdAt),
-      urgent: (a, b) => (daysLeft(a.deadline) ?? 9999) - (daysLeft(b.deadline) ?? 9999),
-      proche: (a, b) => pct(b.raised, b.goal) - pct(a.raised, a.goal),
-    }
-    return [...l].sort(sorters[sort] || sorters.populaire)
-  }, [campaigns, state.favorites, q, cat, sort, favs])
+  const path = favs ? (user ? '/favorites' : null) : `/campaigns${qs({ q: debounced, cat, sort, limit: 48 })}`
+  const { data, error, loading, reload } = useApi(path)
+  let list = data?.campaigns || []
+  if (favs && cat) list = list.filter((c) => c.category === cat)
 
   return (
     <div className="page">
@@ -59,10 +51,12 @@ export default function Explore() {
             <input
               type="search"
               inputMode="search"
+              enterKeyHint="search"
               placeholder="Rechercher une cagnotte, une ville…"
               value={q}
               onChange={(e) => set('q', e.target.value)}
               aria-label="Rechercher"
+              disabled={favs}
             />
             {q && (
               <button type="button" aria-label="Effacer" onClick={() => set('q', '')}>
@@ -85,22 +79,33 @@ export default function Explore() {
       </div>
 
       <div className="container">
-        <div className="sortbar">
-          <span className="muted">{list.length} cagnotte{list.length > 1 ? 's' : ''}</span>
-          <div className="segmented" role="tablist">
-            {SORTS.map((s) => (
-              <button key={s.id} role="tab" aria-selected={sort === s.id} className={sort === s.id ? 'is-on' : ''} onClick={() => set('tri', s.id === 'populaire' ? '' : s.id)}>
-                {s.label}
-              </button>
-            ))}
+        {!favs && (
+          <div className="sortbar">
+            <span className="muted">{loading ? 'Recherche…' : `${list.length} cagnotte${list.length > 1 ? 's' : ''}`}</span>
+            <div className="segmented" role="tablist">
+              {SORTS.map((s) => (
+                <button key={s.id} role="tab" aria-selected={sort === s.id} className={sort === s.id ? 'is-on' : ''} onClick={() => set('tri', s.id === 'populaire' ? '' : s.id)}>
+                  {s.label}
+                </button>
+              ))}
+            </div>
           </div>
-        </div>
+        )}
 
-        {list.length ? (
+        {favs && !user ? (
+          <Empty
+            icon={Heart}
+            title="Retrouvez vos favoris"
+            text="Connectez-vous pour enregistrer les cagnottes qui vous tiennent à cœur."
+            action={<Link to="/connexion?next=/explorer?favoris=1" className="btn btn--primary">Se connecter</Link>}
+          />
+        ) : error ? (
+          <ErrorState error={error} onRetry={reload} />
+        ) : loading && !data ? (
+          <div className="grid"><SkeletonCards n={6} /></div>
+        ) : list.length ? (
           <div className="grid">
-            {list.map((c) => (
-              <CampaignCard key={c.id} campaign={c} />
-            ))}
+            {list.map((c) => <CampaignCard key={c.id} campaign={c} />)}
           </div>
         ) : (
           <Empty

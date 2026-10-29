@@ -1,19 +1,21 @@
 import { Link } from 'react-router-dom'
 import { ArrowRight, Download, Share2, ShieldCheck, Smartphone, Sparkles, Zap } from 'lucide-react'
-import { useStore, useToast } from '../store/AppStore'
+import { useApi, useStore, useToast } from '../store/AppStore'
 import { CATEGORIES } from '../lib/categories'
 import { fcfa, compact, pct } from '../lib/utils'
 import { useDocumentTitle, useInstallPrompt } from '../lib/hooks'
-import { Avatar, CampaignCard, Cover, Logo, Progress } from '../components/ui'
+import { Avatar, CampaignCard, Cover, Logo, Progress, SkeletonCards } from '../components/ui'
 
 export default function Home() {
   useDocumentTitle()
-  const { campaigns, user, state } = useStore()
-  const active = campaigns.filter((c) => c.status === 'active')
-  const featured = [...active].sort((a, b) => (b.featured ? 1 : 0) - (a.featured ? 1 : 0) || b.count - a.count).slice(0, 6)
-  const recent = [...active].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)).slice(0, 4)
-  const total = state.contributions.reduce((s, k) => s + k.amount, 0)
-  const hero = featured[0]
+  const { user } = useStore()
+  const featuredQ = useApi('/campaigns?sort=une&limit=6')
+  const recentQ = useApi('/campaigns?sort=recent&limit=4')
+  const statsQ = useApi('/stats')
+  const featured = featuredQ.data?.campaigns || []
+  const recent = recentQ.data?.campaigns || []
+  const stats = statsQ.data || { raised: 0, contributions: 0, campaigns: 0 }
+  const hero = featured.find((c) => c.raised !== null)
 
   return (
     <div className="page page--home">
@@ -32,7 +34,7 @@ export default function Home() {
       <section className="hero">
         <div className="container hero__inner">
           <div className="hero__copy">
-            <span className="eyebrow"><Sparkles size={14} /> 0 % de frais pour l’organisateur</span>
+            <span className="eyebrow"><Sparkles size={14} /> Création gratuite · Retrait à tout moment</span>
             <h1>
               {user ? <>Salam {user.name.split(' ')[0]},<br /></> : null}
               Ensemble, on va <span className="hl">plus loin.</span>
@@ -62,10 +64,10 @@ export default function Home() {
                   <Cover campaign={hero} className="phone__cover" />
                   <div className="phone__body">
                     <b>{hero.title}</b>
-                    <Progress value={pct(hero.raised, hero.goal)} thick />
+                    <Progress value={hero.percent ?? pct(hero.raised, hero.goal)} thick />
                     <div className="phone__nums">
                       <span><strong>{fcfa(hero.raised)}</strong> collectés</span>
-                      <span>{pct(hero.raised, hero.goal)} %</span>
+                      <span>{hero.percent ?? pct(hero.raised, hero.goal)} %</span>
                     </div>
                     <span className="btn btn--primary btn--block">Participer</span>
                   </div>
@@ -79,9 +81,9 @@ export default function Home() {
       </section>
 
       <section className="container stats">
-        <div><strong>{compact(total)} F</strong><span>collectés</span></div>
-        <div><strong>{state.contributions.length}</strong><span>participations</span></div>
-        <div><strong>{campaigns.length}</strong><span>cagnottes</span></div>
+        <div><strong>{compact(stats.raised)} F</strong><span>collectés</span></div>
+        <div><strong>{stats.contributions}</strong><span>participations</span></div>
+        <div><strong>{stats.campaigns}</strong><span>cagnottes</span></div>
       </section>
 
       <section className="section">
@@ -109,9 +111,7 @@ export default function Home() {
           </div>
         </div>
         <div className="carousel container">
-          {featured.map((c) => (
-            <CampaignCard key={c.id} campaign={c} />
-          ))}
+          {featuredQ.loading ? <SkeletonCards n={3} /> : featured.map((c) => <CampaignCard key={c.id} campaign={c} />)}
         </div>
       </section>
 
@@ -135,13 +135,13 @@ export default function Home() {
               <span className="steps__n">3</span>
               <Smartphone size={22} />
               <h3>Recevez l’argent</h3>
-              <p>Les participations arrivent par Wave, Orange Money, Free Money ou carte. Retrait quand vous voulez.</p>
+              <p>Les participations arrivent par Wave, Orange Money, Free Money ou carte. Retirez votre argent à tout moment.</p>
             </li>
           </ol>
         </div>
       </section>
 
-      <section className="section">
+      {recent.length > 0 && <section className="section">
         <div className="container">
           <div className="section__head">
             <h2>Nouvelles cagnottes</h2>
@@ -153,7 +153,7 @@ export default function Home() {
             ))}
           </div>
         </div>
-      </section>
+      </section>}
 
       <InstallCard />
 
@@ -164,8 +164,8 @@ export default function Home() {
             <div>
               <h3>Votre argent est protégé</h3>
               <p>
-                Paiements chiffrés, organisateurs vérifiés par numéro de téléphone, et fonds reversés uniquement au
-                titulaire de la cagnotte.
+                Paiements traités par PayDunya, agréé au Sénégal. Les retraits sont protégés par mot de passe et
+                envoyés uniquement au numéro du titulaire de la cagnotte.
               </p>
             </div>
           </div>

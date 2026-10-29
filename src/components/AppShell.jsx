@@ -1,16 +1,16 @@
 import { useEffect } from 'react'
 import { Link, NavLink, Outlet, useLocation } from 'react-router-dom'
-import { Compass, Home, PiggyBank, Plus, User, WifiOff } from 'lucide-react'
+import { Compass, Construction, Home, PiggyBank, Plus, User, WifiOff } from 'lucide-react'
 import { useStore } from '../store/AppStore'
 import { useOnline } from '../lib/hooks'
 import { haptic } from '../lib/utils'
 import { Avatar, Logo } from './ui'
 
-const FLOW = /\/(participer|creer|modifier|connexion)(\/|$)/
+const FLOW = /\/(participer|creer|modifier|connexion|paiement)(\/|$)/
 
 export default function AppShell() {
   const { pathname } = useLocation()
-  const { user } = useStore()
+  const { user, settings } = useStore()
   const online = useOnline()
   const inFlow = FLOW.test(pathname)
   const inDetail = /^\/c\/[^/]+\/?$/.test(pathname)
@@ -31,6 +31,7 @@ export default function AppShell() {
             <NavLink to="/explorer">Explorer</NavLink>
             <NavLink to="/comment-ca-marche">Comment ça marche</NavLink>
             {user && <NavLink to="/mes-cagnottes">Mes cagnottes</NavLink>}
+            {user?.role === 'admin' && <NavLink to="/admin">Admin</NavLink>}
           </nav>
           <div className="dheader__actions">
             {user ? (
@@ -46,6 +47,12 @@ export default function AppShell() {
           </div>
         </div>
       </header>
+
+      {settings.maintenance_mode && (
+        <div className="offline">
+          <Construction size={15} /> {settings.maintenance_message}
+        </div>
+      )}
 
       {!online && (
         <div className="offline">
@@ -84,6 +91,7 @@ function Tab({ to, icon: Icon, label, end }) {
 }
 
 function Footer() {
+  const { settings } = useStore()
   return (
     <footer className="footer">
       <div className="container footer__inner">
@@ -101,8 +109,8 @@ function Footer() {
           <div>
             <h4>Aide</h4>
             <Link to="/comment-ca-marche#faq">Questions fréquentes</Link>
-            <a href="mailto:contact@barkelou.com">contact@barkelou.com</a>
-            <a href="https://wa.me/221770000000" target="_blank" rel="noreferrer">WhatsApp</a>
+            <a href={`mailto:${settings.contact_email}`}>{settings.contact_email}</a>
+            <a href={`https://wa.me/${settings.contact_whatsapp}`} target="_blank" rel="noreferrer">WhatsApp</a>
           </div>
           <div>
             <h4>Légal</h4>

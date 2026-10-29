@@ -16,6 +16,9 @@ const HowItWorks = lazy(() => import('./pages/Info').then((m) => ({ default: m.H
 const Terms = lazy(() => import('./pages/Info').then((m) => ({ default: m.Terms })))
 const Privacy = lazy(() => import('./pages/Info').then((m) => ({ default: m.Privacy })))
 const NotFound = lazy(() => import('./pages/NotFound'))
+const PaymentReturn = lazy(() => import('./pages/PaymentReturn'))
+const PaymentSimulator = lazy(() => import('./pages/PaymentReturn').then((m) => ({ default: m.PaymentSimulator })))
+const Admin = lazy(() => import('./pages/Admin'))
 
 const Loading = () => (
   <div className="page-loading">
@@ -43,6 +46,9 @@ export default function App() {
                 <Route path="comment-ca-marche" element={<HowItWorks />} />
                 <Route path="cgu" element={<Terms />} />
                 <Route path="confidentialite" element={<Privacy />} />
+                <Route path="paiement/retour" element={<PaymentReturn />} />
+                <Route path="paiement/simulateur" element={<PaymentSimulator />} />
+                <Route path="admin" element={<Admin />} />
                 <Route path="*" element={<NotFound />} />
               </Route>
             </Routes>

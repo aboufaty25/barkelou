@@ -1,15 +1,29 @@
+import { useState } from 'react'
 import { Link } from 'react-router-dom'
-import { HandCoins, Heart, PiggyBank, Plus, TrendingUp, Users } from 'lucide-react'
-import { useStore } from '../store/AppStore'
+import { ArrowDownToLine, HandCoins, PiggyBank, Plus, TrendingUp, Wallet } from 'lucide-react'
+import { useApi, useStore } from '../store/AppStore'
 import { fcfa, timeAgo } from '../lib/utils'
 import { methodById } from '../services/payments'
 import { useDocumentTitle } from '../lib/hooks'
-import { CampaignCard, Empty, TopBar } from '../components/ui'
+import { CampaignCard, Empty, ErrorState, Loader, TopBar } from '../components/ui'
+import WithdrawSheet from '../components/WithdrawSheet'
+
+const WSTATUS = {
+  success: ['Envoyé', 'badge--ok'],
+  processing: ['En cours', 'badge--pending'],
+  pending_review: ['En validation', 'badge--pending'],
+  failed: ['Échoué', 'badge--fail'],
+  rejected: ['Refusé', 'badge--fail'],
+}
 
 export default function MyCampaigns() {
   useDocumentTitle('Mes cagnottes')
-  const { user, campaigns, state } = useStore()
+  const { user, ready } = useStore()
+  const mine = useApi(user ? '/campaigns/mine' : null)
+  const activity = useApi(user ? '/me/activity' : null)
+  const [withdrawFor, setWithdrawFor] = useState(null)
 
+  if (!ready) return <Loader />
   if (!user) {
     return (
       <div className="page">
@@ -18,7 +32,7 @@ export default function MyCampaigns() {
           <Empty
             icon={PiggyBank}
             title="Retrouvez toutes vos cagnottes"
-            text="Connectez-vous pour créer, suivre et gérer vos cagnottes et vos participations."
+            text="Connectez-vous pour créer, suivre et gérer vos cagnottes et retirer votre argent."
             action={
               <div className="stack">
                 <Link to="/connexion?next=/mes-cagnottes" className="btn btn--primary btn--lg btn--block">Se connecter</Link>
@@ -31,15 +45,14 @@ export default function MyCampaigns() {
     )
   }
 
-  const mine = campaigns.filter((c) => c.ownerId === user.id)
-  const totalRaised = mine.reduce((s, c) => s + c.raised, 0)
-  const totalCount = mine.reduce((s, c) => s + c.count, 0)
-  const myGifts = state.contributions.filter((k) => k.userId === user.id)
-  const favs = campaigns.filter((c) => state.favorites.includes(c.id))
-  const recentIn = state.contributions
-    .filter((k) => mine.some((c) => c.id === k.campaignId))
-    .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
-    .slice(0, 5)
+  if (mine.loading && !mine.data) return <Loader />
+  if (mine.error) return <div className="page"><TopBar title="Mes cagnottes" back={false} /><div className="container"><ErrorState error={mine.error} onRetry={mine.reload} /></div></div>
+
+  const campaigns = mine.data.campaigns
+  const available = campaigns.reduce((s, c) => s + c.balance.available, 0)
+  const totalRaised = campaigns.reduce((s, c) => s + (c.raised || 0), 0)
+  const act = activity.data || { received: [], given: [], withdrawals: [] }
+  const withdrawable = campaigns.filter((c) => c.balance.available > 0 && c.status !== 'suspended')
 
   return (
     <div className="page">
@@ -49,27 +62,46 @@ export default function MyCampaigns() {
 
         <div className="kpis">
           <div className="kpi kpi--main">
+            <Wallet size={18} />
+            <span>Disponible au retrait</span>
+            <strong>{fcfa(available)}</strong>
+            {withdrawable.length > 0 && (
+              <button className="btn btn--gold btn--sm kpi__cta" onClick={() => setWithdrawFor(withdrawable[0])}>
+                <ArrowDownToLine size={15} /> Retirer
+              </button>
+            )}
+          </div>
+          <div className="kpi">
             <TrendingUp size={18} />
             <span>Total collecté</span>
             <strong>{fcfa(totalRaised)}</strong>
           </div>
           <div className="kpi">
-            <Users size={18} />
-            <span>Participants</span>
-            <strong>{totalCount}</strong>
-          </div>
-          <div className="kpi">
             <HandCoins size={18} />
             <span>Mes dons</span>
-            <strong>{fcfa(myGifts.reduce((s, k) => s + k.amount, 0))}</strong>
+            <strong>{fcfa(act.given.reduce((s, k) => s + k.amount, 0))}</strong>
           </div>
         </div>
 
         <section className="section">
           <div className="section__head"><h2>Cagnottes que j’organise</h2></div>
-          {mine.length ? (
+          {campaigns.length ? (
             <div className="grid">
-              {mine.map((c) => <CampaignCard key={c.id} campaign={c} />)}
+              {campaigns.map((c) => (
+                <div key={c.id} className="mine-item">
+                  <CampaignCard campaign={c} />
+                  <div className="mine-item__bar">
+                    <span>
+                      Solde : <b>{fcfa(c.balance.available)}</b>
+                      {c.status === 'pending' && <span className="badge badge--pending">En validation</span>}
+                      {c.status === 'suspended' && <span className="badge badge--fail">Suspendue</span>}
+                    </span>
+                    <button className="btn btn--soft btn--sm" disabled={!c.balance.available || c.status === 'suspended'} onClick={() => setWithdrawFor(c)}>
+                      Retirer
+                    </button>
+                  </div>
+                </div>
+              ))}
             </div>
           ) : (
             <Empty
@@ -81,59 +113,71 @@ export default function MyCampaigns() {
           )}
         </section>
 
-        {recentIn.length > 0 && (
+        {act.withdrawals.length > 0 && (
+          <section className="section">
+            <div className="section__head"><h2>Mes retraits</h2></div>
+            <ul className="activity">
+              {act.withdrawals.map((w) => (
+                <li key={w.id}>
+                  <span className="activity__dot" style={{ background: methodById(w.method)?.color }} />
+                  <div className="grow">
+                    <b>{fcfa(w.payout)}</b> vers {methodById(w.method)?.label} · {w.phone}
+                    <span className="muted"> · {w.title} · {timeAgo(w.created_at)}</span>
+                    {w.failure_reason && <small className="muted block">{w.failure_reason}</small>}
+                  </div>
+                  <span className={`badge ${WSTATUS[w.status]?.[1]}`}>{WSTATUS[w.status]?.[0]}</span>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
+
+        {act.received.length > 0 && (
           <section className="section">
             <div className="section__head"><h2>Dernières participations reçues</h2></div>
             <ul className="activity">
-              {recentIn.map((k) => {
-                const c = mine.find((x) => x.id === k.campaignId)
-                return (
-                  <li key={k.id}>
-                    <span className="activity__dot" style={{ background: methodById(k.method)?.color }} />
-                    <div>
-                      <b>{k.anonymous ? 'Anonyme' : k.name}</b> a donné <b>{fcfa(k.amount)}</b>
-                      <span className="muted"> · {c?.title} · {timeAgo(k.createdAt)}</span>
-                    </div>
-                  </li>
-                )
-              })}
+              {act.received.map((k) => (
+                <li key={k.id}>
+                  <span className="activity__dot" style={{ background: methodById(k.channel)?.color }} />
+                  <div>
+                    <b>{k.donor_name}</b>{k.anonymous && <span className="muted"> (anonyme)</span>} a donné <b>{fcfa(k.amount)}</b>
+                    <span className="muted"> · {k.title} · {timeAgo(k.paid_at)}</span>
+                  </div>
+                </li>
+              ))}
             </ul>
           </section>
         )}
 
-        {myGifts.length > 0 && (
+        {act.given.length > 0 && (
           <section className="section">
             <div className="section__head"><h2>Mes participations</h2></div>
             <ul className="activity">
-              {myGifts.map((k) => {
-                const c = campaigns.find((x) => x.id === k.campaignId)
-                return (
-                  <li key={k.id}>
-                    <span className="activity__dot" style={{ background: methodById(k.method)?.color }} />
-                    <div>
-                      <b>{fcfa(k.amount)}</b> pour{' '}
-                      {c ? <Link to={`/c/${c.slug}`} className="link">{c.title}</Link> : 'une cagnotte supprimée'}
-                      <span className="muted"> · {timeAgo(k.createdAt)}</span>
-                    </div>
-                  </li>
-                )
-              })}
+              {act.given.map((k) => (
+                <li key={k.id}>
+                  <span className="activity__dot" style={{ background: methodById(k.channel)?.color }} />
+                  <div>
+                    <b>{fcfa(k.amount)}</b> pour <Link to={`/c/${k.slug}`} className="link">{k.title}</Link>
+                    <span className="muted"> · {timeAgo(k.paid_at)}</span>
+                  </div>
+                </li>
+              ))}
             </ul>
           </section>
         )}
-
-        {favs.length > 0 && (
-          <section className="section">
-            <div className="section__head">
-              <h2><Heart size={18} /> Favoris</h2>
-              <Link to="/explorer?favoris=1" className="link">Tout voir</Link>
-            </div>
-            <div className="list">
-              {favs.slice(0, 4).map((c) => <CampaignCard key={c.id} campaign={c} variant="row" />)}
-            </div>
-          </section>
-        )}
       </div>
+
+      {withdrawFor && (
+        <WithdrawSheet
+          open
+          campaign={withdrawFor}
+          onClose={() => setWithdrawFor(null)}
+          onDone={() => {
+            mine.reload()
+            activity.reload()
+          }}
+        />
+      )}
     </div>
   )
 }

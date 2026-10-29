@@ -1,45 +1,77 @@
-import { useMemo, useState } from 'react'
+import { useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import {
-  ArrowLeft, BadgeCheck, CalendarClock, Copy, Lock, LockOpen, MapPin, MessageCircle,
-  Pencil, Share2, Trash2, Users, Wallet, Target,
+  ArrowLeft, BadgeCheck, CalendarClock, Clock, Copy, EyeOff, Lock, LockOpen, MapPin, MessageCircle,
+  Pencil, Share2, ShieldAlert, Trash2, Users, Wallet, Target,
 } from 'lucide-react'
-import { useStore, useToast } from '../store/AppStore'
-import { PAYMENT_METHODS, methodById } from '../services/payments'
+import { useApi, useStore, useToast } from '../store/AppStore'
+import { api } from '../lib/api'
+import { methodById } from '../services/payments'
 import { useDocumentTitle, useShare } from '../lib/hooks'
-import { daysLeft, daysLeftLabel, fcfa, fcfaLong, formatDate, formatPhone, isValidSnPhone, pct, siteUrl, timeAgo } from '../lib/utils'
-import { Avatar, CategoryChip, Cover, Empty, FavButton, Field, MethodBadge, Progress, Sheet } from '../components/ui'
-import NotFound from './NotFound'
+import { daysLeft, daysLeftLabel, fcfa, fcfaLong, formatDate, siteUrl, timeAgo } from '../lib/utils'
+import { Avatar, CategoryChip, Cover, Empty, ErrorState, FavButton, Loader, Progress, Sheet } from '../components/ui'
+import WithdrawSheet from '../components/WithdrawSheet'
 
 export default function Campaign() {
   const { slug } = useParams()
   const navigate = useNavigate()
   const toast = useToast()
   const share = useShare()
-  const { campaigns, state, user, updateCampaign, deleteCampaign } = useStore()
-  const c = campaigns.find((x) => x.slug === slug)
-  useDocumentTitle(c?.title)
+  const { user } = useStore()
+  const { data, error, loading, reload } = useApi(`/campaigns/${encodeURIComponent(slug)}`, [user?.id])
+  useDocumentTitle(data?.campaign?.title)
   const [tab, setTab] = useState('histoire')
   const [shareOpen, setShareOpen] = useState(false)
   const [withdrawOpen, setWithdrawOpen] = useState(false)
   const [showAll, setShowAll] = useState(false)
+  const [busy, setBusy] = useState(false)
 
-  const contributions = useMemo(
-    () => state.contributions.filter((k) => k.campaignId === c?.id).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)),
-    [state.contributions, c?.id]
-  )
-  if (!c) return <NotFound />
+  if (loading && !data) return <Loader />
+  if (error) {
+    return (
+      <div className="page">
+        <div className="container narrow pad-y">
+          <ErrorState error={error} onRetry={error.status === 404 ? null : reload} />
+          <div className="center"><Link to="/explorer" className="btn btn--primary">Explorer les cagnottes</Link></div>
+        </div>
+      </div>
+    )
+  }
 
-  const isOwner = user && user.id === c.ownerId
-  const p = pct(c.raised, c.goal)
+  const c = data.campaign
+  const contributions = data.contributions
+  const isOwner = c.isOwner
+  const hidden = c.raised === null
   const dl = daysLeft(c.deadline)
   const ended = c.status === 'closed' || (dl !== null && dl < 0)
   const messages = contributions.filter((k) => k.message)
-  const top = [...contributions].sort((a, b) => b.amount - a.amount)[0]
+  const top = hidden ? null : [...contributions].sort((a, b) => (b.amount || 0) - (a.amount || 0))[0]
   const shownList = showAll ? contributions : contributions.slice(0, 8)
   const path = `/c/${c.slug}`
 
-  const doShare = () => setShareOpen(true)
+  const toggleStatus = async () => {
+    setBusy(true)
+    try {
+      await api.patch(`/campaigns/${c.id}`, { status: c.status === 'closed' ? 'active' : 'closed' })
+      toast(c.status === 'closed' ? 'Cagnotte rouverte' : 'Cagnotte clôturée', 'success')
+      reload()
+    } catch (e) {
+      toast(e.message, 'error')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const remove = async () => {
+    if (!confirm('Supprimer définitivement cette cagnotte ?')) return
+    try {
+      await api.del(`/campaigns/${c.id}`)
+      toast('Cagnotte supprimée')
+      navigate('/mes-cagnottes', { replace: true })
+    } catch (e) {
+      toast(e.message, 'error')
+    }
+  }
 
   return (
     <div className="page page--campaign">
@@ -50,7 +82,7 @@ export default function Campaign() {
             <ArrowLeft size={20} />
           </button>
           <div className="row gap-8">
-            <button className="icon-btn icon-btn--glass" aria-label="Partager" onClick={doShare}>
+            <button className="icon-btn icon-btn--glass" aria-label="Partager" onClick={() => setShareOpen(true)}>
               <Share2 size={18} />
             </button>
             <FavButton id={c.id} className="icon-btn icon-btn--glass" />
@@ -63,13 +95,15 @@ export default function Campaign() {
           <div className="cp-headline">
             <div className="row gap-8 wrap">
               <CategoryChip id={c.category} />
-              {ended && <span className="chip chip--muted"><Lock size={12} /> Clôturée</span>}
+              {c.status === 'closed' && <span className="chip chip--muted"><Lock size={12} /> Clôturée</span>}
+              {c.status === 'pending' && <span className="chip chip--warn"><Clock size={12} /> En attente de validation</span>}
+              {c.status === 'suspended' && <span className="chip chip--danger"><ShieldAlert size={12} /> Suspendue</span>}
             </div>
             <h1>{c.title}</h1>
             <div className="cp-owner">
               <Avatar name={c.ownerName} size={40} />
               <div>
-                <b>{c.ownerName} <BadgeCheck size={15} className="verified" aria-label="Organisateur vérifié" /></b>
+                <b>{c.ownerName} <BadgeCheck size={15} className="verified" aria-label="Numéro vérifié" /></b>
                 <span className="muted">
                   Créée {timeAgo(c.createdAt)}
                   {c.city && <> · <MapPin size={12} /> {c.city}</>}
@@ -78,32 +112,28 @@ export default function Campaign() {
             </div>
           </div>
 
-          {/* Carte de progression (mobile) */}
           <div className="cp-progress-card mobile-only">
-            <ProgressBlock c={c} p={p} ended={ended} />
+            <ProgressBlock c={c} ended={ended} />
           </div>
 
           {isOwner && (
             <div className="owner-panel">
               <div className="owner-panel__head">
                 <b>Vous gérez cette cagnotte</b>
-                <span className="muted">Disponible : {fcfa(c.raised - withdrawnFor(state, c.id))}</span>
+                {data.balance && <span className="owner-panel__bal">Disponible : <strong>{fcfa(data.balance.available)}</strong></span>}
               </div>
               <div className="owner-panel__actions">
                 <Link to={`${path}/modifier`} className="tile"><Pencil size={18} />Modifier</Link>
-                <button className="tile" onClick={() => setWithdrawOpen(true)}><Wallet size={18} />Retirer</button>
-                <button className="tile" onClick={doShare}><Share2 size={18} />Partager</button>
-                <button
-                  className="tile"
-                  onClick={() => {
-                    updateCampaign(c.id, { status: c.status === 'closed' ? 'active' : 'closed' })
-                    toast(c.status === 'closed' ? 'Cagnotte rouverte' : 'Cagnotte clôturée', 'success')
-                  }}
-                >
+                <button className="tile tile--accent" onClick={() => setWithdrawOpen(true)} disabled={c.status === 'suspended'}><Wallet size={18} />Retirer</button>
+                <button className="tile" onClick={() => setShareOpen(true)}><Share2 size={18} />Partager</button>
+                <button className="tile" onClick={toggleStatus} disabled={busy || ['pending', 'suspended'].includes(c.status)}>
                   {c.status === 'closed' ? <LockOpen size={18} /> : <Lock size={18} />}
                   {c.status === 'closed' ? 'Rouvrir' : 'Clôturer'}
                 </button>
               </div>
+              {hidden === false && c.hideAmounts && (
+                <p className="field__hint"><EyeOff size={13} /> Les montants sont masqués pour le public.</p>
+              )}
             </div>
           )}
 
@@ -129,17 +159,8 @@ export default function Campaign() {
                 <div><dt><CalendarClock size={16} /> Date limite</dt><dd>{c.deadline ? formatDate(c.deadline) : 'Aucune'}</dd></div>
                 <div><dt><Users size={16} /> Participants</dt><dd>{c.count}</dd></div>
               </dl>
-              {isOwner && !c.ownerId.startsWith('seed') && (
-                <button
-                  className="btn btn--danger-ghost btn--sm"
-                  onClick={() => {
-                    if (confirm('Supprimer définitivement cette cagnotte ?')) {
-                      deleteCampaign(c.id)
-                      toast('Cagnotte supprimée')
-                      navigate('/mes-cagnottes', { replace: true })
-                    }
-                  }}
-                >
+              {isOwner && c.count === 0 && (
+                <button className="btn btn--danger-ghost btn--sm" onClick={remove}>
                   <Trash2 size={15} /> Supprimer la cagnotte
                 </button>
               )}
@@ -149,20 +170,20 @@ export default function Campaign() {
           {tab === 'participants' &&
             (contributions.length ? (
               <>
-                {top && !c.hideAmounts && (
+                {top && (
                   <div className="top-donor">
-                    🏆 Plus grosse participation : <b>{top.anonymous ? 'Anonyme' : top.name}</b> · {fcfa(top.amount)}
+                    🏆 Plus grosse participation : <b>{top.name}</b> · {fcfa(top.amount)}
                   </div>
                 )}
                 <ul className="donors">
                   {shownList.map((k) => (
                     <li key={k.id}>
-                      <Avatar name={k.name} anonymous={k.anonymous} size={40} />
+                      <Avatar name={k.name} anonymous={k.anonymous && k.name === 'Anonyme'} size={40} />
                       <div className="donors__info">
-                        <b>{k.anonymous ? 'Anonyme' : k.name}</b>
+                        <b>{k.name}{k.anonymous && k.name !== 'Anonyme' && <span className="muted"> · anonyme</span>}</b>
                         <span className="muted">{timeAgo(k.createdAt)} · {methodById(k.method)?.label}</span>
                       </div>
-                      {!c.hideAmounts && <strong className="donors__amt">{fcfa(k.amount)}</strong>}
+                      {k.amount !== null && <strong className="donors__amt">{fcfa(k.amount)}</strong>}
                     </li>
                   ))}
                 </ul>
@@ -181,9 +202,9 @@ export default function Campaign() {
               <ul className="messages">
                 {messages.map((k) => (
                   <li key={k.id}>
-                    <Avatar name={k.name} anonymous={k.anonymous} size={34} />
+                    <Avatar name={k.name} anonymous={k.name === 'Anonyme'} size={34} />
                     <div className="bubble">
-                      <b>{k.anonymous ? 'Anonyme' : k.name}</b>
+                      <b>{k.name}</b>
                       <p>{k.message}</p>
                       <span className="muted">{timeAgo(k.createdAt)}</span>
                     </div>
@@ -197,23 +218,26 @@ export default function Campaign() {
 
         <aside className="cp-side desktop-only">
           <div className="cp-progress-card sticky">
-            <ProgressBlock c={c} p={p} ended={ended} />
-            {!ended && (
+            <ProgressBlock c={c} ended={ended} />
+            {!ended && c.status === 'active' && (
               <Link to={`${path}/participer`} className="btn btn--primary btn--lg btn--block">Participer</Link>
             )}
-            <button className="btn btn--ghost btn--block" onClick={doShare}>
+            <button className="btn btn--ghost btn--block" onClick={() => setShareOpen(true)}>
               <Share2 size={17} /> Partager
             </button>
           </div>
         </aside>
       </div>
 
-      {/* Barre d'action collante (mobile) */}
       <div className="action-bar mobile-only">
-        <button className="btn btn--soft btn--icon" aria-label="Partager" onClick={doShare}>
+        <button className="btn btn--soft btn--icon" aria-label="Partager" onClick={() => setShareOpen(true)}>
           <Share2 size={20} />
         </button>
-        {ended ? (
+        {isOwner ? (
+          <button className="btn btn--primary btn--lg btn--grow" onClick={() => setWithdrawOpen(true)} disabled={c.status === 'suspended'}>
+            <Wallet size={18} /> Retirer {data.balance ? fcfa(data.balance.available) : ''}
+          </button>
+        ) : ended || c.status !== 'active' ? (
           <span className="btn btn--disabled btn--lg btn--grow">Cagnotte clôturée</span>
         ) : (
           <Link to={`${path}/participer`} className="btn btn--primary btn--lg btn--grow">Participer</Link>
@@ -221,25 +245,39 @@ export default function Campaign() {
       </div>
 
       <ShareSheet open={shareOpen} onClose={() => setShareOpen(false)} c={c} share={share} toast={toast} />
-      {isOwner && <WithdrawSheet open={withdrawOpen} onClose={() => setWithdrawOpen(false)} c={c} />}
+      {isOwner && (
+        <WithdrawSheet
+          open={withdrawOpen}
+          onClose={() => setWithdrawOpen(false)}
+          campaign={c}
+          onDone={reload}
+        />
+      )}
     </div>
   )
 }
 
-const withdrawnFor = (state, id) =>
-  (state.withdrawals || []).filter((w) => w.campaignId === id).reduce((s, w) => s + w.amount, 0)
-
-function ProgressBlock({ c, p, ended }) {
+function ProgressBlock({ c, ended }) {
   const dl = daysLeft(c.deadline)
+  const hidden = c.raised === null
   return (
     <>
-      <div className="pb-amount">
-        <strong>{fcfa(c.raised)}</strong>
-        <span className="muted">collectés sur {fcfa(c.goal)}</span>
-      </div>
-      <Progress value={p} thick />
+      {hidden ? (
+        <div className="pb-amount">
+          <strong className="pb-private"><EyeOff size={22} /> Montants privés</strong>
+          <span className="muted">L’organisateur a choisi de ne pas afficher les sommes</span>
+        </div>
+      ) : (
+        <>
+          <div className="pb-amount">
+            <strong>{fcfa(c.raised)}</strong>
+            <span className="muted">collectés sur {fcfa(c.goal)}</span>
+          </div>
+          <Progress value={c.percent} thick />
+        </>
+      )}
       <div className="pb-stats">
-        <div><b>{p} %</b><span>de l’objectif</span></div>
+        <div><b>{hidden ? '—' : `${c.percent} %`}</b><span>de l’objectif</span></div>
         <div><b>{c.count}</b><span>participant{c.count > 1 ? 's' : ''}</span></div>
         <div>
           <b>{ended ? '—' : dl === null ? '∞' : Math.max(dl, 0)}</b>
@@ -283,72 +321,6 @@ function ShareSheet({ open, onClose, c, share, toast }) {
       <div className="share-link">
         <span>{url.replace(/^https?:\/\//, '')}</span>
       </div>
-    </Sheet>
-  )
-}
-
-function WithdrawSheet({ open, onClose, c }) {
-  const { state, requestWithdrawal, user } = useStore()
-  const toast = useToast()
-  const available = c.raised - withdrawnFor(state, c.id)
-  const [method, setMethod] = useState('wave')
-  const [phone, setPhone] = useState(formatPhone(user?.phone || ''))
-  const [amount, setAmount] = useState('')
-  const value = Number(String(amount).replace(/\D/g, '')) || 0
-  const error =
-    value && value < 1000 ? 'Minimum 1 000 F' : value > available ? 'Montant supérieur au solde disponible' : ''
-  const history = (state.withdrawals || []).filter((w) => w.campaignId === c.id)
-
-  return (
-    <Sheet open={open} onClose={onClose} title="Retirer les fonds">
-      <div className="balance">
-        <span className="muted">Solde disponible</span>
-        <strong>{fcfaLong(available)}</strong>
-      </div>
-      <Field label="Montant" error={error} htmlFor="w-amount">
-        <div className="input-affix">
-          <input id="w-amount" inputMode="numeric" className="input" placeholder="0" value={amount} onChange={(e) => setAmount(e.target.value.replace(/\D/g, ''))} />
-          <span>FCFA</span>
-        </div>
-      </Field>
-      <button type="button" className="link" onClick={() => setAmount(String(available))}>Tout retirer</button>
-      <div className="methods methods--compact">
-        {PAYMENT_METHODS.filter((m) => m.needsPhone).map((m) => (
-          <button key={m.id} type="button" className={`method ${method === m.id ? 'is-on' : ''}`} onClick={() => setMethod(m.id)}>
-            <MethodBadge method={m} size={30} />
-            <span>{m.label}</span>
-          </button>
-        ))}
-      </div>
-      <Field label="Numéro de réception" htmlFor="w-phone" error={phone && !isValidSnPhone(phone) ? 'Numéro invalide' : ''}>
-        <div className="input-affix input-affix--left">
-          <span>+221</span>
-          <input id="w-phone" type="tel" inputMode="tel" className="input" placeholder="77 123 45 67" value={phone} onChange={(e) => setPhone(formatPhone(e.target.value))} />
-        </div>
-      </Field>
-      <button
-        className="btn btn--primary btn--lg btn--block"
-        disabled={!value || !!error || !isValidSnPhone(phone)}
-        onClick={() => {
-          requestWithdrawal({ campaignId: c.id, amount: value, method, phone: phone.replace(/\D/g, '') })
-          toast('Demande de retrait envoyée ✓', 'success')
-          setAmount('')
-          onClose()
-        }}
-      >
-        Demander le retrait
-      </button>
-      <p className="field__hint center">Les retraits sont traités sous 24 h ouvrées après vérification.</p>
-      {history.length > 0 && (
-        <ul className="history">
-          {history.map((w) => (
-            <li key={w.id}>
-              <span>{fcfa(w.amount)} · {methodById(w.method)?.label}</span>
-              <span className="badge badge--pending">En cours · {timeAgo(w.createdAt)}</span>
-            </li>
-          ))}
-        </ul>
-      )}
     </Sheet>
   )
 }
