@@ -16,7 +16,7 @@ import paymentRoutes from './routes/payments.js'
 import withdrawalRoutes from './routes/withdrawals.js'
 import adminRoutes from './routes/admin.js'
 
-export function createApp() {
+export function createApp({ onRequest } = {}) {
   const app = express()
   app.disable('x-powered-by')
   const tp = config.trustProxy
@@ -63,6 +63,7 @@ export function createApp() {
     next()
   })
 
+  if (onRequest) api.use((_req, _res, next) => (onRequest(), next()))
   api.get('/health', (_req, res) => res.json({ ok: true }))
   api.get('/settings', async (_req, res) => {
     const s = await getSettings()

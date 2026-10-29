@@ -31,8 +31,16 @@ export const config = {
   isTest: env.NODE_ENV === 'test',
   port: Number(env.PORT) || 3000,
   publicUrl: (env.PUBLIC_URL || 'http://localhost:5173').replace(/\/$/, ''),
-  databaseUrl: env.DATABASE_URL || 'postgres://postgres@localhost:5432/barkelou',
-  databaseSsl: env.DATABASE_SSL === 'true',
+  // MySQL / MariaDB. Sur Hostinger : DB_HOST=127.0.0.1 (et non « localhost »)
+  db: {
+    url: env.DATABASE_URL || '',
+    host: env.DB_HOST || '127.0.0.1',
+    port: Number(env.DB_PORT) || 3306,
+    user: env.DB_USER || 'barkelou',
+    password: env.DB_PASSWORD || '',
+    name: env.DB_NAME || 'barkelou',
+    ssl: env.DB_SSL === 'true',
+  },
   // Secret de signature des sessions (64 caractères aléatoires recommandés)
   jwtSecret: required('JWT_SECRET', { minLength: 32 }) || 'dev-only-insecure-jwt-secret-change-me-please-123456',
   // Clé de chiffrement des secrets stockés en base (clés PayDunya) : 64 caractères hexadécimaux
@@ -42,5 +50,7 @@ export const config = {
   paydunyaMock: !isProd && env.PAYDUNYA_MOCK !== 'false',
 }
 
+if (isProd && !config.db.url && !env.DB_PASSWORD) throw new Error('Configurez DB_HOST, DB_USER, DB_PASSWORD et DB_NAME (ou DATABASE_URL)')
+if (config.db.url && !config.db.url.startsWith('mysql://')) throw new Error('DATABASE_URL doit commencer par mysql://')
 if (isProd && config.paydunyaMock) throw new Error('PAYDUNYA_MOCK est interdit en production')
 if (!/^[0-9a-f]{64}$/i.test(config.encryptionKey)) throw new Error('ENCRYPTION_KEY doit contenir 64 caractères hexadécimaux')

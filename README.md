@@ -4,7 +4,7 @@
 Paiements et retraits par **Wave, Orange Money, Free Money et carte bancaire** via **PayDunya**.
 
 - Application **React (Vite) + PWA** : sur mobile elle s’installe et se comporte comme une application native.
-- Serveur **Node.js (Express) + PostgreSQL** : comptes, cagnottes, paiements PayDunya, commissions, retraits, espace admin.
+- Serveur **Node.js (Express) + MySQL / MariaDB** (base Hostinger) : comptes, cagnottes, paiements PayDunya, commissions, retraits, espace admin.
 
 ---
 
@@ -32,42 +32,65 @@ Paiements et retraits par **Wave, Orange Money, Free Money et carte bancaire** v
 - **Comptes** : mots de passe hachés (bcrypt), session en cookie `httpOnly` / `Secure` / `SameSite`, verrouillage après 5 échecs, limitation de débit sur la connexion, les paiements et les retraits, déconnexion de tous les appareils, suspension immédiate.
 - **Admin** : chaque changement de paramètres, validation de retrait ou nomination d’admin exige le mot de passe administrateur. Les clés PayDunya sont **chiffrées en base (AES-256-GCM)** et ne sont jamais réaffichées.
 - **Web** : protection CSRF (en-tête dédié + contrôle d’origine), en-têtes de sécurité stricts (CSP, HSTS, anti-iframe), validation de toutes les entrées, requêtes SQL paramétrées, vérification du contenu réel des images envoyées, journal d’audit.
-- **Tests** : `npm test` vérifie 17 scénarios dont les tentatives de fraude (IPN falsifiée, montant modifié, retraits simultanés, accès d’un autre utilisateur, injection SQL…).
+- **Tests** : `npm test` vérifie 18 scénarios dont les tentatives de fraude (IPN falsifiée, montant modifié, retraits simultanés, accès d’un autre utilisateur, injection SQL…).
 
-## 3. Mise en ligne
+## 3. Mise en ligne sur Hostinger
 
-### Pré-requis
-- Un hébergeur Node.js : **Render**, **Railway**, **Fly.io** ou un **VPS** (Docker fourni).
-- Une base **PostgreSQL** (Neon, Supabase, Render, Railway…).
-- Un compte **PayDunya Business** avec une application d’intégration, et l’**API de déboursement (PUSH)** activée pour les retraits.
+Offre nécessaire : **Business Web Hosting** ou **Cloud** (applications Node.js), ou un **VPS**.
+PayDunya : un compte Business avec une application d’intégration et l’**API de déboursement (PUSH)** activée pour les retraits.
 
-### Étapes
-1. **Variables d’environnement** : copiez `.env.example`, générez les secrets avec `npm run secrets`, renseignez `DATABASE_URL` et `PUBLIC_URL=https://barkelou.com`.
-2. **Déploiement** :
-   - Render / Railway : commande de build `npm ci && npm run build`, commande de démarrage `npm start`.
-   - Docker : `docker build -t barkelou . && docker run --env-file .env -p 3000:3000 barkelou`.
-   Les tables sont créées automatiquement au démarrage.
-3. **Compte administrateur** (une seule fois, depuis le shell de l’hébergeur) :
-   ```bash
-   npm run create-admin -- --phone 77XXXXXXX --name "Votre Nom" --password "un-mot-de-passe-très-solide"
-   ```
-4. **Connectez-vous** sur barkelou.com, ouvrez **Profil › Espace administrateur › Paramètres › PayDunya** et collez la *Master Key*, la *Private Key* et le *Token*. Commencez en mode **Test**.
-5. **Chez PayDunya**, déclarez l’URL de notification `https://barkelou.com/api/payments/ipn`.
-6. **Domaine** : pointez `barkelou.com` vers votre hébergeur (enregistrements DNS indiqués par celui-ci). Le HTTPS est obligatoire.
-7. Faites un paiement et un retrait de test, puis passez PayDunya en mode **Production** dans les paramètres.
+### a. Créer la base MySQL
+hPanel › **Bases de données › Gestion des bases MySQL** › créez une base et un utilisateur (ex. `u123456789_barkelou`). Notez le nom, l’utilisateur et le mot de passe. Les tables sont créées automatiquement au premier démarrage.
+
+### b. Créer l’application Node.js
+hPanel › **Sites web › Ajouter un site › Application web Node.js** › **Importer depuis GitHub** › dépôt `barkelou`, branche `main`.
+| Réglage | Valeur |
+|---|---|
+| Version de Node | 22.x |
+| Commande de build | `npm run build` |
+| Dossier de sortie | `dist` |
+| Fichier d’entrée | `server.js` |
+
+### c. Variables d’environnement
+Dans les réglages de l’application, ajoutez (modèle complet dans `.env.example`) :
+```
+PUBLIC_URL=https://barkelou.com
+DB_HOST=127.0.0.1          ← pas « localhost »
+DB_PORT=3306
+DB_NAME=u123456789_barkelou
+DB_USER=u123456789_barkelou
+DB_PASSWORD=…
+JWT_SECRET=…               ← généré avec  npm run secrets
+ENCRYPTION_KEY=…           ← généré avec  npm run secrets
+TRUST_PROXY=1
+```
+`npm run secrets` se lance sur votre ordinateur (ou en SSH). **Gardez une copie d’`ENCRYPTION_KEY`** : sans elle, les clés PayDunya enregistrées devront être ressaisies.
+Puis **Déployer** (ou **Redémarrer** après un changement de variable).
+
+### d. Compte administrateur
+- **Sans SSH** : inscrivez-vous sur barkelou.com avec votre numéro, ajoutez la variable `ADMIN_PHONE=77XXXXXXX`, redémarrez l’application. Votre compte devient administrateur. Retirez ensuite la variable.
+- **Avec SSH** : `npm run create-admin -- --phone 77XXXXXXX --name "Votre Nom" --password "mot-de-passe-très-solide"`
+
+### e. Brancher PayDunya
+1. Sur barkelou.com : **Profil › Espace administrateur › Paramètres › PayDunya** : collez *Master Key*, *Private Key*, *Token*. Commencez en mode **Test**.
+2. Chez PayDunya, déclarez l’URL de notification `https://barkelou.com/api/payments/ipn`.
+3. Faites un paiement et un retrait de test, puis passez en mode **Production**.
 
 > PayDunya documente l’URL de production du déboursement (`/api/v2/disburse`). L’URL sandbox utilisée en mode Test (`/sandbox-api/v2/disburse`) est déduite de celle de l’encaissement : vérifiez-la avec le support PayDunya, ou testez les retraits directement en production avec de petits montants.
+
+### Autres hébergeurs
+VPS (Hostinger ou autre) : `docker build -t barkelou . && docker run --env-file .env -p 3000:3000 barkelou`, ou `npm ci && npm run build && npm start` derrière Nginx. Toute base MySQL 8 / MariaDB 10.5+ convient.
 
 ## 4. Développement
 
 ```bash
 npm install
-# PostgreSQL local requis (par défaut postgres://postgres@localhost:5432/barkelou)
+# MySQL / MariaDB local requis : renseignez DB_USER, DB_PASSWORD, DB_NAME dans .env
 npm run seed            # données de démonstration
 npm run create-admin -- --phone 771000001 --password "admin-local-123"
 npm run server          # API sur :3000 (PayDunya simulé automatiquement)
 npm run dev             # application sur :5173
-npm test                # tests de sécurité et de bout en bout (base barkelou_test)
+npm test                # tests de sécurité et de bout en bout (base barkelou_test, vidée à chaque lancement)
 ```
 
 Hors production, PayDunya est **simulé** : le bouton « Payer » ouvre un simulateur qui permet de valider ou d’annuler le paiement, et les retraits réussissent (un numéro se terminant par `000` simule un échec). Ce simulateur est impossible à activer en production.

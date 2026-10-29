@@ -4,7 +4,7 @@
  * Si le numéro existe déjà, le compte est simplement promu administrateur.
  */
 import { parseArgs } from 'node:util'
-import { migrate, one, pool } from '../db.js'
+import { exec, migrate, one, pool, uuid } from '../db.js'
 import { hashPassword } from '../lib/auth.js'
 import { isSnPhone, normalizePhone } from '../lib/http.js'
 
@@ -18,16 +18,17 @@ if (!isSnPhone(phone)) {
 }
 
 await migrate()
-const existing = await one('SELECT id FROM users WHERE phone = $1', [phone])
+const existing = await one('SELECT id FROM users WHERE phone = ?', [phone])
 if (existing) {
-  await one(`UPDATE users SET role = 'admin', status = 'active', token_version = token_version + 1 WHERE id = $1 RETURNING id`, [existing.id])
+  await exec(`UPDATE users SET role = 'admin', status = 'active', token_version = token_version + 1 WHERE id = ?`, [existing.id])
   console.log(`✓ Le compte ${phone} est maintenant administrateur.`)
 } else {
   if (!values.password || values.password.length < 12) {
     console.error('Mot de passe administrateur requis (12 caractères minimum) : --password "..."')
     process.exit(1)
   }
-  await one(`INSERT INTO users(name, phone, password_hash, role) VALUES ($1, $2, $3, 'admin') RETURNING id`, [
+  await exec(`INSERT INTO users(id, name, phone, password_hash, role) VALUES (?, ?, ?, ?, 'admin')`, [
+    uuid(),
     values.name || 'Administrateur',
     phone,
     await hashPassword(values.password),

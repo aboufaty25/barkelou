@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { many, query } from '../db.js'
+import { exec, many } from '../db.js'
 import { decrypt, encrypt, mask } from './crypto.js'
 
 /**
@@ -85,11 +85,16 @@ let cacheAt = 0
 
 export async function getSettings({ fresh = false } = {}) {
   if (!fresh && cache && Date.now() - cacheAt < 10_000) return cache
-  const rows = await many('SELECT key, value FROM settings')
+  const rows = await many('SELECT setting_key, value FROM settings')
   const s = structuredClone(DEFAULTS)
-  for (const { key, value } of rows) {
+  for (const { setting_key: key, value } of rows) {
     if (!(key in DEFAULTS)) continue
-    s[key] = SECRET_KEYS.includes(key) ? safeDecrypt(value) : value
+    try {
+      const v = JSON.parse(value)
+      s[key] = SECRET_KEYS.includes(key) ? safeDecrypt(v) : v
+    } catch {
+      /* valeur illisible : on garde la valeur par défaut */
+    }
   }
   cache = s
   cacheAt = Date.now()
@@ -115,9 +120,9 @@ export async function saveSettings(patch, actorId) {
     if (!(key in DEFAULTS)) continue
     if (SECRET_KEYS.includes(key) && (raw === '' || raw == null)) continue
     const value = SECRET_KEYS.includes(key) ? encrypt(raw.trim()) : raw
-    await query(
-      `INSERT INTO settings(key, value, updated_by, updated_at) VALUES ($1, $2, $3, now())
-       ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_by = EXCLUDED.updated_by, updated_at = now()`,
+    await exec(
+      `INSERT INTO settings(setting_key, value, updated_by, updated_at) VALUES (?, ?, ?, CURRENT_TIMESTAMP(3))
+       ON DUPLICATE KEY UPDATE value = VALUES(value), updated_by = VALUES(updated_by), updated_at = CURRENT_TIMESTAMP(3)`,
       [key, JSON.stringify(value), actorId]
     )
     changed.push(key)

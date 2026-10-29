@@ -23,9 +23,4 @@ dist-ssr
 *.sln
 *.sw?
 
-# Icônes générées au build (scripts/icons.mjs)
-public/pwa-*.png
-public/maskable-*.png
-public/apple-touch-icon.png
-public/og-image.png
 .env

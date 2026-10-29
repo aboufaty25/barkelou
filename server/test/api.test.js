@@ -1,14 +1,14 @@
 /**
- * Tests de bout en bout de l'API (base PostgreSQL de test + PayDunya simulé).
- * Lancer : npm test   (DATABASE_URL_TEST pour choisir la base, par défaut barkelou_test)
+ * Tests de bout en bout de l'API (base MySQL/MariaDB de test + PayDunya simulé).
+ * Lancer : npm test   (DB_NAME_TEST pour choisir la base, par défaut barkelou_test)
  */
 process.env.NODE_ENV = 'test'
-process.env.DATABASE_URL = process.env.DATABASE_URL_TEST || 'postgres://postgres@localhost:5432/barkelou_test'
+process.env.DB_NAME = process.env.DB_NAME_TEST || 'barkelou_test'
 
 import { test, before, after } from 'node:test'
 import assert from 'node:assert/strict'
 
-const { pool, migrate, one } = await import('../db.js')
+const { pool, migrate, one, exec, many } = await import('../db.js')
 const { createApp } = await import('../app.js')
 const { mock } = await import('../lib/paydunya.js')
 const { invalidateSettings } = await import('../lib/settings.js')
@@ -17,7 +17,12 @@ let server
 let base
 
 before(async () => {
-  await pool.query('DROP SCHEMA public CASCADE; CREATE SCHEMA public;')
+  // Base de test vidée à chaque lancement
+  await exec('SET FOREIGN_KEY_CHECKS = 0')
+  for (const t of await many('SELECT table_name AS t FROM information_schema.tables WHERE table_schema = DATABASE()')) {
+    await exec(`DROP TABLE \`${t.t}\``)
+  }
+  await exec('SET FOREIGN_KEY_CHECKS = 1')
   await migrate()
   invalidateSettings()
   server = createApp().listen(0)
@@ -70,7 +75,7 @@ async function newUser(name = 'Awa Diop', phone) {
 
 async function newAdmin() {
   const a = await newUser('Admin Barkelou')
-  await pool.query(`UPDATE users SET role = 'admin' WHERE id = $1`, [a.user.id])
+  await exec(`UPDATE users SET role = 'admin' WHERE id = ?`, [a.user.id])
   return a
 }
 
@@ -149,7 +154,7 @@ test('paiement : IPN à la signature invalide ignorée', async () => {
   const c = await newCampaign(owner)
   const p = await pay(c.id, 5_000, { hash: 'deadbeef' })
   assert.equal(p.ipnStatus, 401)
-  const k = await one('SELECT status FROM contributions WHERE provider_token = $1', [p.token])
+  const k = await one('SELECT status FROM contributions WHERE provider_token = ?', [p.token])
   assert.equal(k.status, 'pending')
 })
 
@@ -157,7 +162,7 @@ test('paiement : montant payé différent du montant attendu → rejeté', async
   const owner = await newUser()
   const c = await newCampaign(owner)
   const p = await pay(c.id, 50_000, { tamperAmount: 100 })
-  const k = await one('SELECT status FROM contributions WHERE provider_token = $1', [p.token])
+  const k = await one('SELECT status FROM contributions WHERE provider_token = ?', [p.token])
   assert.equal(k.status, 'failed')
   const mine = await owner.get(`/campaigns/${c.slug}`)
   assert.equal(mine.data.balance.available, 0)
@@ -225,7 +230,7 @@ test('admin : accès refusé aux utilisateurs, paramètres protégés par mot de
   assert.equal(ok.status, 200, JSON.stringify(ok.data))
   assert.equal(ok.data.settings.paydunya_master_key, '')
   assert.equal(ok.data.settings.paydunya_master_key_hint, '••••1234')
-  const raw = await one(`SELECT value FROM settings WHERE key = 'paydunya_master_key'`)
+  const raw = await one(`SELECT value FROM settings WHERE setting_key = 'paydunya_master_key'`)
   assert.ok(!JSON.stringify(raw.value).includes('MASTER-SECRET'))
   const pub = await agent().get('/settings')
   assert.equal(pub.data.commission_rate, 3)
@@ -286,5 +291,14 @@ test('maintenance : paiements bloqués, lecture possible', async () => {
 test('injection SQL dans la recherche sans effet', async () => {
   const r = await agent().get(`/campaigns?q=${encodeURIComponent("'; DROP TABLE users; --")}`)
   assert.equal(r.status, 200)
-  assert.ok(await one('SELECT 1 FROM users LIMIT 1'))
+  assert.ok(await one('SELECT 1 AS x FROM users LIMIT 1'))
+})
+
+test('recherche insensible aux accents et à la casse', async () => {
+  const owner = await newUser()
+  await newCampaign(owner, { title: 'Baptême à Thiès pour Ndèye' })
+  const r = await agent().get(`/campaigns?q=${encodeURIComponent('bapteme thies')}`)
+  assert.equal(r.status, 200)
+  const r2 = await agent().get(`/campaigns?q=${encodeURIComponent('NDEYE')}`)
+  assert.ok(r2.data.campaigns.some((c) => c.title.includes('Ndèye')))
 })

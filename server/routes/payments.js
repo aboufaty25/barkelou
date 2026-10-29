@@ -2,7 +2,7 @@ import { Router } from 'express'
 import express from 'express'
 import { z } from 'zod'
 import { config } from '../config.js'
-import { one, query } from '../db.js'
+import { exec, one, uuid } from '../db.js'
 import { HttpError, audit, bad, notFound, parse } from '../lib/http.js'
 import { limiter } from '../lib/limits.js'
 import { splitContribution } from '../lib/money.js'
@@ -37,16 +37,17 @@ r.post('/payments', limiter.payment, async (req, res) => {
   if (data.amount > s.max_contribution) throw bad(`Montant maximum : ${s.max_contribution.toLocaleString('fr-FR')} F`)
   if (!data.anonymous && data.name.length < 2) throw bad('Indiquez votre nom.')
 
-  const c = await one('SELECT id, title, status, deadline FROM campaigns WHERE id = $1', [data.campaignId])
+  const c = await one('SELECT id, title, status, deadline FROM campaigns WHERE id = ?', [data.campaignId])
   if (!c) throw notFound('Cagnotte introuvable.')
   if (c.status !== 'active') throw bad('Cette cagnotte ne reçoit plus de participations.')
-  if (c.deadline && new Date(c.deadline).setHours(23, 59, 59) < Date.now()) throw bad('La date limite de cette cagnotte est dépassée.')
+  if (c.deadline && c.deadline < new Date().toISOString().slice(0, 10)) throw bad('La date limite de cette cagnotte est dépassée.')
 
   const split = splitContribution(data.amount, s)
-  const k = await one(
-    `INSERT INTO contributions(campaign_id, user_id, donor_name, anonymous, message, amount, donor_fee, commission, net, total_charged, channel)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id`,
-    [c.id, req.user?.id || null, data.name || 'Anonyme', data.anonymous, data.message || null, split.amount, split.donor_fee, split.commission, split.net, split.total_charged, data.channel]
+  const k = { id: uuid() }
+  await exec(
+    `INSERT INTO contributions(id, campaign_id, user_id, donor_name, anonymous, message, amount, donor_fee, commission, net, total_charged, channel)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [k.id, c.id, req.user?.id || null, data.name || 'Anonyme', data.anonymous, data.message || null, split.amount, split.donor_fee, split.commission, split.net, split.total_charged, data.channel]
   )
 
   try {
@@ -58,10 +59,10 @@ r.post('/payments', limiter.payment, async (req, res) => {
       channel: data.channel,
       customer: { name: data.name },
     })
-    await query('UPDATE contributions SET provider_token = $2, provider_mode = $3 WHERE id = $1', [k.id, token, s.paydunya_mode])
+    await exec('UPDATE contributions SET provider_token = ?, provider_mode = ? WHERE id = ?', [token, s.paydunya_mode, k.id])
     res.status(201).json({ checkoutUrl, token, contributionId: k.id, ...split })
   } catch (e) {
-    await query(`UPDATE contributions SET status = 'failed' WHERE id = $1`, [k.id])
+    await exec(`UPDATE contributions SET status = 'failed' WHERE id = ?`, [k.id])
     if (e instanceof PaymentError) {
       console.error('PayDunya create:', e.details)
       throw new HttpError(502, e.message)
@@ -76,7 +77,7 @@ r.post('/payments', limiter.payment, async (req, res) => {
  * et le montant payé doit correspondre exactement au montant attendu.
  */
 export async function reconcile(token, req) {
-  const k = await one('SELECT * FROM contributions WHERE provider_token = $1', [token])
+  const k = await one('SELECT * FROM contributions WHERE provider_token = ?', [token])
   if (!k) return null
   if (k.status !== 'pending') return k
   const s = await getSettings()
@@ -87,21 +88,22 @@ export async function reconcile(token, req) {
     const linkOk = !info.customData?.contribution_id || info.customData.contribution_id === k.id
     const modeOk = config.paydunyaMock || !info.mode || info.mode === k.provider_mode
     if (!amountOk || !linkOk || !modeOk) {
-      await query(`UPDATE contributions SET status = 'failed' WHERE id = $1 AND status = 'pending'`, [k.id])
+      await exec(`UPDATE contributions SET status = 'failed' WHERE id = ? AND status = 'pending'`, [k.id])
       await audit(req, 'payment.rejected_mismatch', k.id, { expected: k.total_charged, received: info.totalAmount, mode: info.mode })
       return { ...k, status: 'failed' }
     }
-    const upd = await one(
-      `UPDATE contributions SET status = 'paid', paid_at = now(), receipt_url = $2, customer_phone = $3
-       WHERE id = $1 AND status = 'pending' RETURNING *`,
-      [k.id, info.receiptUrl || null, info.customerPhone || null]
+    // La condition « status = 'pending' » garantit qu'un paiement n'est crédité qu'une seule fois
+    const upd = await exec(
+      `UPDATE contributions SET status = 'paid', paid_at = CURRENT_TIMESTAMP(3), receipt_url = ?, customer_phone = ?
+       WHERE id = ? AND status = 'pending'`,
+      [info.receiptUrl || null, info.customerPhone || null, k.id]
     )
-    if (upd) await audit(req, 'payment.paid', k.id, { amount: k.amount, commission: k.commission, campaign: k.campaign_id })
-    return upd || (await one('SELECT * FROM contributions WHERE id = $1', [k.id]))
+    if (upd.affectedRows) await audit(req, 'payment.paid', k.id, { amount: k.amount, commission: k.commission, campaign: k.campaign_id })
+    return one('SELECT * FROM contributions WHERE id = ?', [k.id])
   }
   if (info.status === 'cancelled' || info.status === 'canceled' || info.status === 'failed') {
     const st = info.status === 'failed' ? 'failed' : 'cancelled'
-    await query(`UPDATE contributions SET status = $2 WHERE id = $1 AND status = 'pending'`, [k.id, st])
+    await exec(`UPDATE contributions SET status = ? WHERE id = ? AND status = 'pending'`, [st, k.id])
     return { ...k, status: st }
   }
   return k
@@ -135,10 +137,10 @@ r.get('/payments/:token', async (req, res) => {
     k = await reconcile(token, req)
   } catch (e) {
     if (!(e instanceof PaymentError)) throw e
-    k = await one('SELECT * FROM contributions WHERE provider_token = $1', [token])
+    k = await one('SELECT * FROM contributions WHERE provider_token = ?', [token])
   }
   if (!k) throw notFound('Paiement introuvable.')
-  const c = await one('SELECT slug, title FROM campaigns WHERE id = $1', [k.campaign_id])
+  const c = await one('SELECT slug, title FROM campaigns WHERE id = ?', [k.campaign_id])
   res.json({
     status: k.status,
     amount: k.amount,

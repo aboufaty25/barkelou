@@ -21,12 +21,12 @@ export function withdrawalFee(amount, s) {
 export async function campaignBalance(campaignId, db) {
   const q = `
     SELECT
-      COALESCE((SELECT SUM(net) FROM contributions WHERE campaign_id = $1 AND status = 'paid'), 0) AS credited,
-      COALESCE((SELECT SUM(amount) FROM withdrawals WHERE campaign_id = $1
+      COALESCE((SELECT SUM(net) FROM contributions WHERE campaign_id = ? AND status = 'paid'), 0) AS credited,
+      COALESCE((SELECT SUM(amount) FROM withdrawals WHERE campaign_id = ?
                 AND status IN ('pending_review', 'processing', 'success')), 0) AS withdrawn,
-      COALESCE((SELECT SUM(amount) FROM withdrawals WHERE campaign_id = $1
+      COALESCE((SELECT SUM(amount) FROM withdrawals WHERE campaign_id = ?
                 AND status IN ('pending_review', 'processing')), 0) AS in_progress`
-  const row = db ? (await db.query(q, [campaignId])).rows[0] : await one(q, [campaignId])
+  const row = await (db || { one }).one(q, [campaignId, campaignId, campaignId])
   const credited = Number(row.credited)
   const withdrawn = Number(row.withdrawn)
   return { credited, withdrawn, in_progress: Number(row.in_progress), available: credited - withdrawn }

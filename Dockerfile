@@ -13,8 +13,8 @@ COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
 COPY --from=build /app/server ./server
 COPY --from=build /app/src/data ./src/data
-COPY package.json ./
+COPY package.json server.js ./
 USER node
 EXPOSE 3000
 HEALTHCHECK CMD wget -qO- http://localhost:3000/api/health || exit 1
-CMD ["node", "server/index.js"]
+CMD ["node", "server.js"]

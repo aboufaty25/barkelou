@@ -1,4 +1,4 @@
-import { query } from '../db.js'
+import { exec } from '../db.js'
 
 export class HttpError extends Error {
   constructor(status, message, extra) {
@@ -27,7 +27,7 @@ export const clientIp = (req) => req.ip || req.socket?.remoteAddress || ''
 
 export async function audit(req, action, target, meta) {
   try {
-    await query('INSERT INTO audit_logs(actor_id, action, target, meta, ip) VALUES ($1, $2, $3, $4, $5)', [
+    await exec('INSERT INTO audit_logs(actor_id, action, target, meta, ip) VALUES (?, ?, ?, ?, ?)', [
       req?.user?.id || null,
       action,
       target ? String(target) : null,
