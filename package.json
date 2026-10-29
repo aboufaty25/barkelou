@@ -1,0 +1,31 @@
+{
+  "name": "barkelou",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "icons": "node scripts/icons.mjs",
+    "predev": "node scripts/icons.mjs",
+    "dev": "vite",
+    "prebuild": "node scripts/icons.mjs",
+    "build": "vite build",
+    "preview": "vite preview",
+    "lint": "oxlint"
+  },
+  "dependencies": {
+    "lucide-react": "^1.64.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "react-router-dom": "^7.18.5"
+  },
+  "devDependencies": {
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.1.2",
+    "oxlint": "^1.89.0",
+    "sharp": "^0.35.5",
+    "vite": "^8.3.5",
+    "vite-plugin-pwa": "^2.0.0"
+  },
+  "description": "Barkelou — plateforme de cagnottes en ligne (React + PWA)"
+}
