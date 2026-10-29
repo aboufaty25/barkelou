@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import {
-  ArrowLeft, BadgeCheck, CalendarClock, Clock, Copy, EyeOff, Lock, LockOpen, MapPin, MessageCircle,
+  ArrowLeft, CalendarClock, Clock, Copy, EyeOff, Lock, LockOpen, MapPin, MessageCircle,
   Pencil, Share2, ShieldAlert, Trash2, Users, Wallet, Target,
 } from 'lucide-react'
 import { useApi, useStore, useToast } from '../store/AppStore'
@@ -103,7 +103,7 @@ export default function Campaign() {
             <div className="cp-owner">
               <Avatar name={c.ownerName} size={40} />
               <div>
-                <b>{c.ownerName} <BadgeCheck size={15} className="verified" aria-label="Numéro vérifié" /></b>
+                <b>{c.ownerName}</b>
                 <span className="muted">
                   Créée {timeAgo(c.createdAt)}
                   {c.city && <> · <MapPin size={12} /> {c.city}</>}
